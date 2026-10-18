@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issue 67142 Client Mode Reset</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F6;
+    --surface: #FFFFFF;
+    --ink: #14232B;
+    --muted: #55676F;
+    --rule: #D3DDDE;
+    --accent: #0B7A75;
+    --accent-soft: #DDF0EE;
+    --warn: #A94A16;
+    --warn-soft: #F7E6DB;
+    --code-bg: #E8EFEF;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E191E;
+      --surface: #142229;
+      --ink: #E2ECEE;
+      --muted: #93A5AC;
+      --rule: #26383F;
+      --accent: #4FC3BB;
+      --accent-soft: #123A3A;
+      --warn: #F0965E;
+      --warn-soft: #3A2417;
+      --code-bg: #1A2B32;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E191E;
+    --surface: #142229;
+    --ink: #E2ECEE;
+    --muted: #93A5AC;
+    --rule: #26383F;
+    --accent: #4FC3BB;
+    --accent-soft: #123A3A;
+    --warn: #F0965E;
+    --warn-soft: #3A2417;
+    --code-bg: #1A2B32;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+  }
+  main { max-width: 760px; margin-inline: auto; }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.3; }
+  h1 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; font-weight: 700; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  ul, ol { padding-left: 1.3em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 24px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 8px; }
+
+  .verdict { background: var(--accent-soft); border-radius: 6px; padding: 18px 20px; margin: 20px 0 8px; }
+  .verdict p:last-child, .verdict ul:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--accent); }
+
+  .q { font-weight: 700; margin: 32px 0 6px; }
+  .q::before { content: "Q  "; font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); letter-spacing: 0.06em; }
+
+  pre { background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 6px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; line-height: 1.55; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.6rem; }
+    body { padding-block: 28px 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ray Core · Ray Client · issue #67142</p>
+  <h1>Issue 67142 Client Mode Reset</h1>
+  <p class="meta">整理自 2026-10-18 的 review · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a></p>
+
+  <div class="verdict">
+    <p><strong>一句話:</strong>在 <code>_ClientContext.connect</code> 的 <code>except</code> 裡加 <code>_explicitly_disable_client_mode()</code>,可以修好 issue 的 repro,但寫法不安全。它把整個 process 共用的旗標無條件關掉,沒管其他 client context 是否還連著。</p>
+    <ul>
+      <li><strong>問題 A(嚴重):</strong>用 <code>allow_multiple=True</code> 時,第二個 connect 失敗會把第一個還連著的 context 的 client mode 一起關掉。</li>
+      <li><strong>問題 B:</strong>開啟有 <code>_inside_client_test</code> 判斷,關閉卻沒有,兩邊不對稱。</li>
+      <li><strong>建議:</strong>改在 <code>RayAPIStub.connect</code> 處理,比照 <code>disconnect</code>,只在 <code>len(_all_contexts) == 0</code> 且不在 client test 時才關。</li>
+      <li><strong>驗證狀態:</strong>還沒跑過。這台機器的 Python 沒有安裝 Ray。</li>
+    </ul>
+  </div>
+
+  <h2>1. Issue 在講什麼</h2>
+
+  <p class="q">症狀是什麼?</p>
+  <p><code>ray.init("ray://...")</code> 連線失敗之後,同一個 process 再呼叫本機的 <code>ray.init()</code> 會在 <code>node.py</code> 的 <code>_record_stats</code> 撞到 <code>AssertionError</code>,而不是正常啟動本機 cluster。</p>
+  <p class="cap">issue 附的 repro</p>
+<pre><code>import ray
+import ray._private.client_mode_hook as hook
+from ray._common.network_utils import find_free_port
+
+try:
+    # 這個 port 沒有任何東西在 listen
+    ray.init(f"ray://127.0.0.1:{find_free_port()}")
+except ConnectionError as e:
+    print("ray:// connect failed:", type(e).__name__, e)
+print("client mode enabled after failure:", hook.is_client_mode_enabled)  # True
+ray.init()  # AssertionError</code></pre>
+
+  <p class="q">根因?</p>
+  <p><code>client_mode_hook.is_client_mode_enabled</code>(<code>client_mode_hook.py:16</code>)是 <strong>module-level 的全域旗標</strong>,決定所有 <code>@client_mode_hook</code> 修飾的函式要走本機路徑還是 Ray Client 路徑。<code>_ClientContext.connect</code> 在連線<strong>之前</strong>就把它打開(<code>__init__.py:162</code>),失敗時只呼叫 per-context 的 <code>self.disconnect()</code>,而這個 disconnect 不會動到旗標。旗標就這樣一直停在 True。</p>
+  <p>Workaround:失敗後手動呼叫 <code>ray.util.disconnect()</code>,它走的是 <code>RayAPIStub.disconnect</code>,會把旗標關掉。</p>
+
+  <h2>2. 旗標的生命週期</h2>
+  <p>關鍵是分清楚「per-context」和「process-wide」兩層。旗標只有一個,context 可以有很多個。</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>位置</th><th>動作</th><th>條件</th></tr></thead>
+      <tbody>
+        <tr><td><code>_ClientContext.connect</code> <code>__init__.py:159-162</code></td><td>開啟</td><td><code>not self._inside_client_test</code></td></tr>
+        <tr><td><code>_ClientContext.disconnect</code> <code>__init__.py:247</code></td><td>不動旗標</td><td>只關自己的 worker</td></tr>
+        <tr><td><code>RayAPIStub.disconnect</code> <code>__init__.py:373-374</code></td><td>關閉</td><td><code>len(_all_contexts) == 0</code></td></tr>
+        <tr><td><code>RayAPIStub.shutdown</code> <code>__init__.py:403-404</code></td><td>關閉</td><td><code>len(_all_contexts) == 0</code></td></tr>
+        <tr><td><code>enable_client_mode()</code> <code>client_mode_hook.py:77</code></td><td>開 / 關</td><td>測試用的 context manager</td></tr>
+        <tr><td>這次的修改 <code>__init__.py:222</code></td><td>關閉</td><td><strong>無條件</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>既有的兩個關閉點都會先檢查「還有沒有別的 context 連著」。這次的修改是唯一一個不檢查的。</p>
+
+  <h2>3. 目前的修改</h2>
+<pre><code>         except Exception:
+             self.disconnect()
++            _explicitly_disable_client_mode()
+             raise</code></pre>
+  <p>對 issue 的情境(只有 default context、之前沒連過任何東西)是對的:失敗後旗標回到 False,下一個 <code>ray.init()</code> 走本機路徑。</p>
+  <p>但 issue 本身指的修改位置是 <code>RayAPIStub.connect</code>,不是 <code>_ClientContext.connect</code>。這個差別就是下面兩個問題的來源。</p>
+
+  <h2>4. 隱式假設</h2>
+
+  <h3>A. 假設沒有其他 client context 連著(會壞掉 allow_multiple)</h3>
+  <p><code>client_builder.py:175-184</code>:<code>allow_multiple=True</code> 時,每次 connect 都會 <code>set_context(None)</code> 換一個新的 <code>_ClientContext</code>。</p>
+  <ol>
+    <li>context A 連線成功,旗標 = True,A 在 <code>_all_contexts</code> 裡。</li>
+    <li>context B 連線失敗,走到第 222 行,旗標 = False。</li>
+    <li>A 還連著,但所有 <code>@client_mode_hook</code> 函式現在都走本機路徑,A 的 <code>ray.get</code> / <code>.remote</code> 就壞了。</li>
+  </ol>
+  <p><code>_ClientContext</code> 看不到 <code>_all_contexts</code>,所以在這一層根本沒辦法判斷該不該關。這是要往上搬到 <code>RayAPIStub</code> 的原因。</p>
+
+  <h3>B. 開關不對稱:<code>_inside_client_test</code></h3>
+  <p>開啟時,如果 <code>_inside_client_test</code> 為 True 就跳過,因為測試會自己用 <code>enable_client_mode()</code> 管理旗標。關閉時卻不看這個條件。在這種測試裡只要有一次 connect 失敗,測試的 client mode 就被偷偷關掉,後面的步驟行為會跑掉。</p>
+
+  <div class="note">
+    <p><strong>小問題(既有行為):</strong>如果 process 是用 <code>RAY_CLIENT_MODE=1</code> 啟動的(<code>is_client_mode_enabled_by_default</code>,<code>client_mode_hook.py:20</code>),connect 失敗也會把這個預設值關掉。<code>disconnect</code> 本來就會這樣,可以接受,在 PR 描述提一句就好。</p>
+  </div>
+
+  <h2>5. 建議的改法</h2>
+  <p>把第 222 行拿掉,改在 <code>RayAPIStub.connect</code> 處理,條件比照 <code>disconnect</code>:</p>
+  <p class="cap">python/ray/util/client/__init__.py · RayAPIStub.connect</p>
+<pre><code>def connect(self, *args, **kw_args):
+    self.get_context()._inside_client_test = self._inside_client_test
+    try:
+        conn = self.get_context().connect(*args, **kw_args)
+    except Exception:
+        global _lock, _all_contexts
+        with _lock:
+            # 只有在沒有其他 client context 連著時,才撤銷
+            # _explicitly_enable_client_mode()
+            if not self._inside_client_test and len(_all_contexts) == 0:
+                _explicitly_disable_client_mode()
+        raise
+    global _lock, _all_contexts
+    with _lock:
+        _all_contexts.add(self._cxt.handler)
+    return conn</code></pre>
+  <p>失敗的 context 從來沒被加進 <code>_all_contexts</code>,所以 <code>len == 0</code> 正好代表「這次失敗之前也沒有任何連線」。</p>
+  <p>副作用:<code>_ClientContext.init</code> 裡直接呼叫的 <code>self.connect</code> 失敗時就不會重設旗標。<code>RayAPIStub.init</code> 也可以加同樣的保護,看要不要一起做。</p>
+
+  <h2>6. 測試計畫</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>測試</th><th>放哪</th><th>驗證什麼</th></tr></thead>
+      <tbody>
+        <tr><td>連到沒人 listen 的 port → <code>ConnectionError</code> → 旗標是 False → 本機 <code>ray.init()</code> 成功</td><td><code>test_client_init.py</code> 或 <code>test_client.py</code></td><td>issue 本身的回歸測試</td></tr>
+        <tr><td>A 用 <code>allow_multiple=True</code> 連上,B 連線失敗,A 的 <code>ray.get</code> 還能用</td><td><code>test_client_multi.py</code></td><td>問題 A 不會發生</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>這兩個都要在 Ray dev build 上實際跑過,才能說修好了。</p>
+
+  <h2>7. 送 PR 前(AGENTS.md)</h2>
+  <ul>
+    <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code></li>
+    <li>PR 描述寫清楚:為什麼不是重複的 PR、跑了哪些測試指令和結果、有使用 AI 協助。</li>
+    <li>commit 加 <code>-s</code>(DCO),跑 <code>pre-commit run</code>。</li>
+  </ul>
+</main>
+</body>
+</html>
