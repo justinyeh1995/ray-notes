@@ -101,7 +101,7 @@
 <main>
   <p class="eyebrow">Ray Core · Ray Client · issue #67142</p>
   <h1>Issue 67142 Client Mode Reset</h1>
-  <p class="meta">整理自 2026-10-18 的 review · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a></p>
+  <p class="meta">整理自 2026-10-18 的 review · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a> · 關鍵路徑圖見 <a href="ray-client-mode-critical-path.html">Ray Client 模式關鍵路徑</a></p>
 
   <div class="verdict">
     <p><strong>一句話:</strong>在 <code>_ClientContext.connect</code> 的 <code>except</code> 裡加 <code>_explicitly_disable_client_mode()</code>,可以修好 issue 的 repro,但寫法不安全。它把整個 process 共用的旗標無條件關掉,沒管其他 client context 是否還連著。</p>
@@ -109,7 +109,7 @@
       <li><strong>問題 A(嚴重):</strong>用 <code>allow_multiple=True</code> 時,第二個 connect 失敗會把第一個還連著的 context 的 client mode 一起關掉。</li>
       <li><strong>問題 B:</strong>開啟有 <code>_inside_client_test</code> 判斷,關閉卻沒有,兩邊不對稱。</li>
       <li><strong>建議:</strong>改在 <code>RayAPIStub.connect</code> 處理,比照 <code>disconnect</code>,只在 <code>len(_all_contexts) == 0</code> 且不在 client test 時才關。</li>
-      <li><strong>驗證狀態:</strong>還沒跑過。這台機器的 Python 沒有安裝 Ray。</li>
+      <li><strong>驗證狀態:</strong>已驗證。2026-10-20 用 stub harness 跑過修改前後,結果見 <a href="ray-client-mode-critical-path.html">Ray Client 模式關鍵路徑</a> 第 5 節:issue 的 repro 修好了,但 <code>allow_multiple</code> 與 <code>_inside_client_test</code> 兩條路徑出現回歸。end-to-end 仍需在有 C++ build 的環境確認。</li>
     </ul>
   </div>
 

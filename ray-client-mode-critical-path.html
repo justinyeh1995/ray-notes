@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ray Client Mode Critical Path</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F6;
+    --surface: #FFFFFF;
+    --ink: #14232B;
+    --muted: #55676F;
+    --rule: #D3DDDE;
+    --accent: #0B7A75;
+    --accent-soft: #DDF0EE;
+    --warn: #A94A16;
+    --warn-soft: #F7E6DB;
+    --code-bg: #E8EFEF;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E191E;
+      --surface: #142229;
+      --ink: #E2ECEE;
+      --muted: #93A5AC;
+      --rule: #26383F;
+      --accent: #4FC3BB;
+      --accent-soft: #123A3A;
+      --warn: #F0965E;
+      --warn-soft: #3A2417;
+      --code-bg: #1A2B32;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E191E;
+    --surface: #142229;
+    --ink: #E2ECEE;
+    --muted: #93A5AC;
+    --rule: #26383F;
+    --accent: #4FC3BB;
+    --accent-soft: #123A3A;
+    --warn: #F0965E;
+    --warn-soft: #3A2417;
+    --code-bg: #1A2B32;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+  }
+  main { max-width: 820px; margin-inline: auto; }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.3; }
+  h1 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; font-weight: 700; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  ul, ol { padding-left: 1.3em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 24px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 8px; }
+
+  .verdict { background: var(--accent-soft); border-radius: 6px; padding: 18px 20px; margin: 20px 0 8px; }
+  .verdict p:last-child, .verdict ul:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--accent); }
+
+  .q { font-weight: 700; margin: 32px 0 6px; }
+  .q::before { content: "Q  "; font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); letter-spacing: 0.06em; }
+
+  pre { background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 6px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; line-height: 1.55; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-family: var(--font-mono); font-size: 0.8rem; }
+  .ok { color: var(--accent); font-weight: 700; }
+  .bad { color: var(--warn); font-weight: 700; }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  .figure { margin: 20px 0 8px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); padding: 14px 10px 6px; overflow-x: auto; }
+  .figure svg { display: block; width: 100%; height: auto; min-width: 620px; }
+  .legend { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 16px; }
+  .legend span { margin-right: 16px; white-space: nowrap; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: baseline; }
+  .sw-on { background: var(--accent); }
+  .sw-off { background: var(--warn); }
+  .sw-note { background: var(--muted); }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.6rem; }
+    body { padding-block: 28px 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ray Core · Ray Client · code path map</p>
+  <h1>Ray Client 模式關鍵路徑</h1>
+  <p class="meta">整理自 2026-10-20 · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · 延伸自 <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a> · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a></p>
+
+  <div class="verdict">
+    <p><strong>一句話:</strong><code>ray.init("ray://...")</code> 會走一條七層的委派鏈,最後把一個 <strong>process-wide</strong> 的旗標 <code>is_client_mode_enabled</code> 打開,讓所有 <code>@client_mode_hook</code> 修飾的函式改走 Ray Client 路徑。這條鏈上有<strong>兩處</strong>會打開旗標、<strong>三處</strong>會關閉旗標,而「打開」和「關閉」的條件並不對稱。</p>
+    <ul>
+      <li><strong>這次修改加在鏈的第 7 層</strong>(<code>_ClientContext.connect</code> 的 <code>except</code>),而那一層看不到「別的 context 是否還連著」。</li>
+      <li><strong>實測結果:</strong>修好了 issue 的 repro,但在 <code>allow_multiple</code> 與 <code>_inside_client_test</code> 兩條路徑上造成新的回歸。資料見第 5 節。</li>
+      <li><strong>建議:</strong>改在第 6 層(<code>RayAPIStub.connect</code>)處理,比照既有的 <code>disconnect</code> / <code>shutdown</code>,只在沒有任何 context 存活時才關。</li>
+    </ul>
+  </div>
+
+  <h2>1. 關鍵路徑圖</h2>
+  <p>從使用者呼叫到 gRPC 連線,一共七層。右欄標出每一層對旗標的副作用。</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 900 760" role="img" aria-label="ray.init ray:// 關鍵路徑呼叫鏈與旗標副作用">
+      <defs>
+        <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+        </marker>
+        <marker id="arwOn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+        </marker>
+        <marker id="arwOff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--warn)"/>
+        </marker>
+      </defs>
+
+      <!-- main spine boxes -->
+      <g>
+        <rect x="24" y="8" width="460" height="54" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+        <text x="40" y="30" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">user code</text>
+        <text x="40" y="49" font-family="var(--font-mono)" font-size="14" fill="var(--ink)">ray.init("ray://host:10001")</text>
+
+        <rect x="24" y="84" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="40" y="106" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/_private/worker.py:1696  init()</text>
+        <text x="40" y="125" font-family="var(--font-body)" font-size="14" fill="var(--ink)">address 含 "://" → 決定走 client 路徑</text>
+
+        <rect x="24" y="160" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="40" y="182" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/client_builder.py:403  client()</text>
+        <text x="40" y="201" font-family="var(--font-body)" font-size="14" fill="var(--ink)">組出 ClientBuilder</text>
+
+        <rect x="24" y="236" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="40" y="258" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/client_builder.py:142  ClientBuilder.connect()</text>
+        <text x="40" y="277" font-family="var(--font-body)" font-size="14" fill="var(--ink)">allow_multiple → set_context(None) 換新 context</text>
+
+        <rect x="24" y="312" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="40" y="334" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/util/client_connect.py:55  connect()</text>
+        <text x="40" y="353" font-family="var(--font-body)" font-size="14" fill="var(--ink)">deprecated 的公開 API</text>
+
+        <rect x="24" y="388" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="40" y="410" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/util/client/__init__.py:354  RayAPIStub.connect()</text>
+        <text x="40" y="429" font-family="var(--font-body)" font-size="14" fill="var(--ink)">唯一看得到 _all_contexts 的層</text>
+
+        <rect x="24" y="464" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="40" y="486" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/util/client/__init__.py:122  _ClientContext.connect()</text>
+        <text x="40" y="505" font-family="var(--font-body)" font-size="14" fill="var(--ink)">per-context 層,看不到其他 context</text>
+
+        <rect x="24" y="540" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="40" y="562" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/util/client/worker.py</text>
+        <text x="40" y="581" font-family="var(--font-body)" font-size="14" fill="var(--ink)">Worker() → _server_init() → connection_info()</text>
+      </g>
+
+      <!-- spine arrows -->
+      <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw)">
+        <path d="M254 62 V84"/>
+        <path d="M254 138 V160"/>
+        <path d="M254 214 V236"/>
+        <path d="M254 290 V312"/>
+        <path d="M254 366 V388"/>
+        <path d="M254 442 V464"/>
+        <path d="M254 518 V540"/>
+      </g>
+
+      <!-- flag side effects -->
+      <g>
+        <path d="M484 339 H516" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arwOn)"/>
+        <rect x="516" y="316" width="360" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="530" y="335" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">client_connect.py:55</text>
+        <text x="530" y="353" font-family="var(--font-mono)" font-size="12" fill="var(--accent)">_explicitly_enable_client_mode()</text>
+
+        <path d="M484 491 H516" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arwOn)"/>
+        <rect x="516" y="468" width="360" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="530" y="487" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">__init__.py:159-162</text>
+        <text x="530" y="505" font-family="var(--font-mono)" font-size="12" fill="var(--accent)">if not _inside_client_test → 開</text>
+      </g>
+
+      <!-- fork -->
+      <g stroke="var(--muted)" stroke-width="1.5" fill="none">
+        <path d="M254 594 V614"/>
+        <path d="M254 614 H700 V636" marker-end="url(#arw)"/>
+        <path d="M254 614 V636" marker-end="url(#arw)"/>
+      </g>
+
+      <!-- outcomes -->
+      <rect x="24" y="638" width="440" height="86" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="40" y="662" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">成功</text>
+      <text x="40" y="682" font-family="var(--font-body)" font-size="14" fill="var(--ink)">回傳 conn_info,旗標維持 True</text>
+      <text x="40" y="702" font-family="var(--font-body)" font-size="14" fill="var(--ink)">context 之後才會被加進 _all_contexts</text>
+
+      <rect x="524" y="638" width="352" height="86" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="540" y="662" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">失敗 (raise)</text>
+      <text x="540" y="682" font-family="var(--font-body)" font-size="14" fill="var(--ink)">except: self.disconnect()</text>
+      <text x="540" y="702" font-family="var(--font-body)" font-size="14" fill="var(--warn)">旗標 OFF ← 本次修改新增</text>
+    </svg>
+  </div>
+  <p class="legend">
+    <span><span class="sw sw-on"></span>打開旗標</span>
+    <span><span class="sw sw-off"></span>關閉旗標</span>
+    <span><span class="sw sw-note"></span>一般呼叫鏈</span>
+  </p>
+
+  <h2>2. 旗標是什麼、住在哪</h2>
+  <p>分派開關只有一個,context 可以有很多個。這個落差是所有問題的根源。</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>層級</th><th>東西</th><th>作用範圍</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">process-wide</td><td><code>is_client_mode_enabled</code><br><code>client_mode_hook.py:16</code></td><td>整個 process,決定所有 <code>@client_mode_hook</code> 函式走哪條路</td></tr>
+        <tr><td class="mono">thread-local</td><td><code>_client_hook_status_on_thread</code><br><code>client_mode_hook.py:27</code></td><td>單一 thread,預設 True,<code>disable_client_hook()</code> 會暫時關掉</td></tr>
+        <tr><td class="mono">process-wide</td><td><code>is_client_mode_enabled_by_default</code><br><code>client_mode_hook.py:20</code></td><td>由 <code>RAY_CLIENT_MODE=1</code> 環境變數決定,測試用</td></tr>
+        <tr><td class="mono">per-context</td><td><code>_ClientContext.client_worker</code><br><code>__init__.py:117</code></td><td>一個 context 一條 gRPC 連線</td></tr>
+        <tr><td class="mono">per-context</td><td><code>_ClientContext._inside_client_test</code><br><code>__init__.py:120</code></td><td>測試 harness 專用,決定要不要動全域旗標</td></tr>
+        <tr><td class="mono">process-wide</td><td><code>_all_contexts</code><br><code>__init__.py:315</code></td><td>已成功連線的 context 集合,只有 <code>RayAPIStub</code> 看得到</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>3. 分派決策</h2>
+  <p>每個被 <code>@client_mode_hook</code> 修飾的函式,在被呼叫時都會問一次這個問題。</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 900 400" role="img" aria-label="client_mode_hook 分派決策流程">
+      <defs>
+        <marker id="arw2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+        </marker>
+        <marker id="arw2On" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+
+      <rect x="180" y="8" width="540" height="70" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="200" y="32" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">client_mode_hook.py:145</text>
+      <text x="200" y="54" font-family="var(--font-mono)" font-size="13" fill="var(--ink)">client_mode_should_convert()</text>
+      <text x="200" y="70" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">= (is_client_mode_enabled or is_client_mode_enabled_by_default)</text>
+
+      <path d="M450 78 V110" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw2)"/>
+
+      <rect x="150" y="112" width="600" height="62" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="170" y="136" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">and _get_client_hook_status_on_thread()</text>
+      <text x="170" y="158" font-family="var(--font-body)" font-size="14" fill="var(--ink)">thread-local 的 status 預設是 True,只有 disable_client_hook() 會關</text>
+
+      <path d="M450 174 V206" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw2)"/>
+
+      <path d="M300 206 V240 H120 V268" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw2)"/>
+      <path d="M600 206 V240 H780 V268" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arw2On)"/>
+      <text x="286" y="232" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">否</text>
+      <text x="612" y="232" font-family="var(--font-mono)" font-size="11" fill="var(--accent)">是</text>
+
+      <rect x="24" y="270" width="300" height="76" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="44" y="294" font-family="var(--font-body)" font-size="14" fill="var(--ink)">走本機路徑</text>
+      <text x="44" y="316" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">func(*args, **kwargs)</text>
+      <text x="44" y="334" font-family="var(--font-body)" font-size="12" fill="var(--muted)">真正的 Ray,不是 client</text>
+
+      <rect x="580" y="270" width="296" height="76" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="600" y="294" font-family="var(--font-body)" font-size="14" fill="var(--ink)">再問一次:是 init 嗎?</text>
+      <text x="600" y="316" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">func.__name__ != "init"</text>
+      <text x="600" y="334" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">or is_client_mode_enabled_by_default</text>
+
+      <path d="M580 292 H430 V358" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw2)"/>
+      <text x="440" y="284" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">init 且非預設</text>
+      <path d="M728 346 V358" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arw2On)"/>
+
+      <rect x="24" y="360" width="420" height="44" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="44" y="388" font-family="var(--font-body)" font-size="13" fill="var(--ink)">走本機路徑 — init 不轉換(除非 RAY_CLIENT_MODE=1)</text>
+
+      <rect x="580" y="360" width="296" height="44" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="600" y="388" font-family="var(--font-mono)" font-size="12" fill="var(--accent)">ray.util.client.ray.*  ← client 路徑</text>
+    </svg>
+  </div>
+  <p class="legend">
+    <span><span class="sw sw-on"></span>走 Ray Client</span>
+    <span><span class="sw sw-note"></span>走本機</span>
+  </p>
+
+  <div class="note">
+    <p><strong>為什麼這重要:</strong>旗標壞掉時,<code>ray.get</code> / <code>ray.put</code> / <code>@ray.remote</code> 全部會改走本機路徑。旗標「卡在 True」時則相反:本機的 <code>ray.init()</code> 起來了,但所有操作都被轉去一個根本沒連上的 client。</p>
+  </div>
+
+  <h2>4. 旗標的開關點(不對稱)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>位置</th><th>動作</th><th>條件</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">client_connect.py:55</td><td>開</td><td>無條件(公開 API 路徑)</td></tr>
+        <tr><td class="mono">__init__.py:162</td><td>開</td><td><code>not self._inside_client_test</code></td></tr>
+        <tr><td class="mono">client_mode_hook.py:78</td><td>開</td><td><code>enable_client_mode()</code> context manager</td></tr>
+        <tr><td class="mono">_ClientContext.disconnect</td><td>不動</td><td>只關自己的 worker</td></tr>
+        <tr><td class="mono">__init__.py:374</td><td>關</td><td><code>len(_all_contexts) == 0</code></td></tr>
+        <tr><td class="mono">__init__.py:404</td><td>關</td><td><code>len(_all_contexts) == 0</code></td></tr>
+        <tr><td class="mono">client_mode_hook.py:82</td><td>關</td><td>context manager 離開</td></tr>
+        <tr style="background:var(--warn-soft)"><td class="mono">__init__.py:222 <strong>(本次修改)</strong></td><td>關</td><td><strong>無條件</strong> — 唯一一個不檢查其他 context 的關閉點</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>「開」有兩層條件(其中一層是 <code>_inside_client_test</code>),「關」原本都有「還有沒有別的 context 存活」的把關,這次修改是第一個不遵守這條規則的地方。</p>
+
+  <h2>5. 實測結果</h2>
+  <p>用 stub 掉 <code>ray._raylet</code> 並替換掉 <code>Worker</code> 的 harness,直接驅動<strong>真正的</strong> Python 狀態機(旗標、分派判斷都是真的跑)。修改前後各跑一次同一組情境。</p>
+  <p class="cap">harness:stub ray._raylet + FakeWorker(可控成功/失敗),不需 C++ build</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>情境</th><th>修改前</th><th>修改後</th><th>判斷</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>S1 單一 context,connect 失敗<br><span style="color:var(--muted)">issue 的 repro</span></td>
+          <td class="mono">旗標 = <strong>True</strong>(洩漏)</td>
+          <td class="mono">旗標 = <strong>False</strong></td>
+          <td class="ok">修正</td>
+        </tr>
+        <tr>
+          <td>S2 A 連著、B 失敗</td>
+          <td class="mono">旗標 = True</td>
+          <td class="mono">旗標 = <strong>False</strong></td>
+          <td class="bad">回歸</td>
+        </tr>
+        <tr>
+          <td>S4 <code>_inside_client_test=True</code> 下失敗</td>
+          <td class="mono">旗標 = True</td>
+          <td class="mono">旗標 = <strong>False</strong></td>
+          <td class="bad">回歸</td>
+        </tr>
+        <tr>
+          <td>S5 <code>enable_client_mode()</code> 內失敗</td>
+          <td class="mono">cm 內 = True</td>
+          <td class="mono">cm 內 = <strong>False</strong></td>
+          <td class="bad">回歸</td>
+        </tr>
+        <tr style="background:var(--warn-soft)">
+          <td>S6 allow_multiple:A 活著、B 失敗</td>
+          <td class="mono">A dispatch 正常</td>
+          <td class="mono">A dispatch <strong>壞掉</strong></td>
+          <td class="bad">最嚴重</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>S6 的詳細輸出:<code>A still connected: True</code> 但 <code>A's client-mode dispatch still works? False</code> — A 的連線還活著,可是所有 <code>@client_mode_hook</code> 函式已經不再轉往 client,A 手上那些還在跑的 task 就再也收不到結果。</p>
+  <div class="note">
+    <p><strong>harness 的限制:</strong>驗證的是旗標狀態機與分派判斷(這次修改唯一碰到的地方),不是真的 gRPC 連線。真正的 end-to-end 行為(例如 issue 裡的 <code>AssertionError</code>)仍需要在有 C++ build 的環境跑一次 <code>ray.init()</code> 才算數。</p>
+  </div>
+
+  <details>
+    <summary style="cursor:pointer;font-weight:700;margin:20px 0 10px;">Reproduce:harness 原始碼與跑法</summary>
+    <p>本 repo 的 <code>client_mode_harness.py</code> 就是上表用的腳本。它 stub 掉 <code>ray._raylet</code>、把 client 的 <code>Worker</code> 換成可控成功/失敗的假物件,然後驅動<strong>真正的</strong>旗標與分派邏輯。</p>
+    <p class="cap">在有 pip install -e . 的 Ray source checkout 裡跑</p>
+<pre><code># 修改後
+python client_mode_harness.py
+
+# 拿來對照 baseline
+git -C /path/to/ray stash push -- python/ray/util/client/__init__.py
+python client_mode_harness.py
+git -C /path/to/ray stash pop</code></pre>
+    <p>輸出格式:</p>
+    <p class="cap">S6 · 修改後</p>
+<pre><code>[S6] allow_multiple=True style: context A live, context B connect fails
+  after A connect: {'is_client_mode_enabled': True, 'should_convert': True}
+  contexts registered: 1
+  after B failure: {'is_client_mode_enabled': False, 'should_convert': False}
+  A still connected: True
+  =&gt; A's client-mode dispatch still works? False</code></pre>
+  </details>
+
+  <h2>6. 建議的改法</h2>
+  <p>把 <code>__init__.py:222</code> 拿掉,改在 <code>RayAPIStub.connect</code> 處理,條件比照既有的 <code>disconnect</code> / <code>shutdown</code>。</p>
+  <p class="cap">python/ray/util/client/__init__.py · RayAPIStub.connect</p>
+<pre><code>def connect(self, *args, **kw_args):
+    self.get_context()._inside_client_test = self._inside_client_test
+    try:
+        conn = self.get_context().connect(*args, **kw_args)
+    except Exception:
+        global _lock, _all_contexts
+        with _lock:
+            # 失敗的 context 從來沒被加進 _all_contexts,
+            # 所以 len == 0 代表「這次失敗前也沒有任何連線」
+            if not self._inside_client_test and len(_all_contexts) == 0:
+                _explicitly_disable_client_mode()
+        raise
+    global _lock, _all_contexts
+    with _lock:
+        _all_contexts.add(self._cxt.handler)
+    return conn</code></pre>
+  <p>這一層同時滿足三件事:看得到 <code>_all_contexts</code>、看得到 <code>_inside_client_test</code>、而且失敗的 context 根本還沒被登記進去,所以 <code>len == 0</code> 正好就是「可以安全關旗標」的條件。</p>
+  <p>副作用:<code>_ClientContext.init</code>(<code>__init__.py:299</code>)內部直接呼叫 <code>self.connect</code>,不經過 <code>RayAPIStub.connect</code>,那條路徑不會被這個保護涵蓋。<code>RayAPIStub.init</code>(<code>__init__.py:385</code>)可以加同樣的保護,看要不要一起做。</p>
+
+  <h2>7. 檔案地圖</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>檔案</th><th>在這條路徑上的角色</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">python/ray/_private/worker.py</td><td><code>init()</code> 判斷 address 有沒有 protocol,有的話轉交 client builder</td></tr>
+        <tr><td class="mono">python/ray/client_builder.py</td><td>組出 builder;處理 <code>allow_multiple</code> 的 context 替換;被 <code>worker.py</code> 呼叫</td></tr>
+        <tr><td class="mono">python/ray/util/client_connect.py</td><td>deprecated 公開 API;無條件打開旗標</td></tr>
+        <tr><td class="mono">python/ray/util/client/__init__.py</td><td><code>RayAPIStub</code>(管 context 集合)與 <code>_ClientContext</code>(管一條連線);旗標開關的主要位置</td></tr>
+        <tr><td class="mono">python/ray/util/client/worker.py</td><td>gRPC channel 與 <code>_server_init</code> / <code>connection_info</code></td></tr>
+        <tr><td class="mono">python/ray/_private/client_mode_hook.py</td><td>旗標定義 + <code>client_mode_hook</code> 裝飾器 + 分派判斷</td></tr>
+        <tr><td class="mono">python/ray/util/client/ray_client_helpers.py</td><td>測試 harness;靠 <code>_inside_client_test</code> 避免動到全域旗標</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>8. 送 PR 前</h2>
+  <ul>
+    <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code></li>
+    <li>測試要真的跑過(Ray dev build),並把指令與結果寫進 PR 描述。</li>
+    <li>PR 描述要說明:為什麼不是重複 PR、跑了哪些測試、有使用 AI 協助。</li>
+    <li>commit 加 <code>-s</code>(DCO),跑 <code>pre-commit run</code>。</li>
+  </ul>
+</main>
+</body>
+</html>
