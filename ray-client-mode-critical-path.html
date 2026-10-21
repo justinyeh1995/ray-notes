@@ -111,20 +111,90 @@
 </head>
 <body>
 <main>
-  <p class="eyebrow">Ray Core · Ray Client · code path map</p>
-  <h1>Ray Client 模式關鍵路徑</h1>
-  <p class="meta">整理自 2026-10-20 · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · 延伸自 <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a> · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a></p>
+  <p class="eyebrow">Ray Core · Ray Client · code path map + design notes</p>
+  <h1>Ray Client 模式:關鍵路徑與設計沿革</h1>
+  <p class="meta">整理自 2026-10-20~21 · 分支 fix/ray-init-client-mode · 行號以 master 95d3a43269 加上未 commit 的修改為準 · 延伸自 <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a> · <a href="https://github.com/ray-project/ray/issues/67142">ray#67142</a></p>
 
   <div class="verdict">
-    <p><strong>一句話:</strong><code>ray.init("ray://...")</code> 會走一條七層的委派鏈,最後把一個 <strong>process-wide</strong> 的旗標 <code>is_client_mode_enabled</code> 打開,讓所有 <code>@client_mode_hook</code> 修飾的函式改走 Ray Client 路徑。這條鏈上有<strong>兩處</strong>會打開旗標、<strong>三處</strong>會關閉旗標,而「打開」和「關閉」的條件並不對稱。</p>
+    <p><strong>一句話:</strong>client mode 存在的目的只有一個 —— <strong>讓你不用改任何一行 Ray 程式碼,就能在自己筆電的 Python shell 裡驅動一個遠端 cluster</strong>。為了達成這件事,它用了一個 process-wide 的旗標 <code>is_client_mode_enabled</code> 加呼叫時 dispatch,讓所有 <code>@client_mode_hook</code> 修飾的函式改走 Ray Client 路徑。這條鏈上有<strong>兩處</strong>會打開旗標、<strong>三處</strong>會關閉旗標,而「打開」和「關閉」的條件並不對稱。</p>
     <ul>
+      <li><strong>第 1 節</strong>是「client mode 是為了什麼」;<strong>第 6 節</strong>是「它為什麼長成這樣」(設計沿革 + 病史)。</li>
       <li><strong>這次修改加在鏈的第 7 層</strong>(<code>_ClientContext.connect</code> 的 <code>except</code>),而那一層看不到「別的 context 是否還連著」。</li>
-      <li><strong>實測結果:</strong>修好了 issue 的 repro,但在 <code>allow_multiple</code> 與 <code>_inside_client_test</code> 兩條路徑上造成新的回歸。資料見第 5 節。</li>
+      <li><strong>實測結果:</strong>修好了 issue 的 repro,但在 <code>allow_multiple</code> 與 <code>_inside_client_test</code> 兩條路徑上造成新的回歸。資料見第 8 節。</li>
       <li><strong>建議:</strong>改在第 6 層(<code>RayAPIStub.connect</code>)處理,比照既有的 <code>disconnect</code> / <code>shutdown</code>,只在沒有任何 context 存活時才關。</li>
     </ul>
   </div>
 
-  <h2>1. 關鍵路徑圖</h2>
+  <h2>1. Client mode 是為了什麼</h2>
+  <p>目的其實只有一句話:</p>
+  <p class="q">讓你不用改任何一行 Ray 程式碼,就能在自己筆電的 Python shell 裡,驅動一個遠端的 cluster。</p>
+  <p>架構上,<strong>你筆電上那個 process 不是 cluster 的成員</strong>。client server 幫你在 cluster 裡起了一個<strong>真的 driver</strong>,你的 <code>ray.get</code> / <code>@ray.remote</code> 全部走 gRPC 送過去。</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 900 250" role="img" aria-label="Client mode 的 server-side driver 架構">
+      <defs>
+        <marker id="arw4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <rect x="24" y="40" width="230" height="120" rx="10" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="44" y="68" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">你的筆電</text>
+      <text x="44" y="94" font-family="var(--font-body)" font-size="14" fill="var(--ink)">python shell</text>
+      <text x="44" y="118" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">ray.get / @ray.remote</text>
+      <text x="44" y="140" font-family="var(--font-body)" font-size="12" fill="var(--warn)">(不是 core worker)</text>
+
+      <rect x="330" y="40" width="240" height="120" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="350" y="68" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">head node</text>
+      <text x="350" y="94" font-family="var(--font-body)" font-size="14" fill="var(--ink)">Ray Client Server</text>
+      <text x="350" y="118" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">port 10001</text>
+      <text x="350" y="140" font-family="var(--font-body)" font-size="12" fill="var(--ink)">在這裡起真的 driver</text>
+
+      <rect x="646" y="40" width="230" height="120" rx="10" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="666" y="68" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">cluster</text>
+      <text x="666" y="94" font-family="var(--font-body)" font-size="14" fill="var(--ink)">真正的 node</text>
+      <text x="666" y="118" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">task 在這裡跑</text>
+      <text x="666" y="140" font-family="var(--font-body)" font-size="12" fill="var(--ink)">ray.init() 真的起了它</text>
+
+      <path d="M254 100 H324" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw4)"/>
+      <text x="262" y="90" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">gRPC</text>
+      <path d="M570 100 H640" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw4)"/>
+      <text x="578" y="90" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">驅動</text>
+
+      <text x="24" y="200" font-family="var(--font-body)" font-size="13" fill="var(--muted)">server-side driver:client server 收到你的 gRPC 之後,在 cluster 裡用真的 ray.init() 把 job 起起來</text>
+      <text x="24" y="224" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">util/client/server/server.py:782, :839</text>
+    </svg>
+  </div>
+
+  <h3>為什麼需要它(2020 年那個時空)</h3>
+  <p>那時候 Ray 只能「把 script 丟到 cluster 上跑」,你<strong>沒辦法</strong>在自己筆電的 REPL 裡面對一個遠端 cluster 逐步除錯。Client mode 補的就是這個洞。它跟 Jobs API 是同一時期的兩條路,定位不同:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>方式</th><th>定位</th><th>driver 在哪</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">ray.init()</td><td>本機開發</td><td>你的筆電(而且是本機 cluster)</td></tr>
+        <tr style="background:var(--accent-soft)"><td class="mono">ray.init("ray://…")</td><td><strong>互動式開發遠端 cluster</strong></td><td>你的筆電,但只是 gRPC proxy;真的 driver 在 cluster 裡</td></tr>
+        <tr><td class="mono">Jobs API</td><td>生產 / ML workloads(現在的主流)</td><td>cluster 裡,完全不需要你的筆電</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>今天誰還在用</h3>
+  <ul>
+    <li><code>ray.util.state</code> 的 State API 可以直接吃 <code>ray://</code> address,從筆電查遠端 cluster 狀態(<code>util/state/api.py:127</code>)</li>
+    <li><strong>Spark on Ray</strong> 就是走 <code>ray://</code> 連的(<code>util/spark/cluster_init.py:1227</code>)</li>
+    <li>Dask on Ray 有 client mode 的測試路徑</li>
+    <li><code>ray.util.client</code> 本身是 public API</li>
+  </ul>
+
+  <h3>代價(為什麼 ML workloads 不推薦)</h3>
+  <ul>
+    <li>物件全部要<strong>經過 client server 序列化再傳</strong>,沒有本機 object store 的 zero-copy → 慢</li>
+    <li>連線斷掉超過 <strong>30 秒</strong>,workload 直接被殺(<code>DEFAULT_CLIENT_RECONNECT_GRACE_PERIOD = 30</code>,<code>ray_constants.py:339</code>)</li>
+    <li>doc 直接講:<em>"Ray Client has architectural limitations and may not work as expected when using Ray for ML workloads (like Ray Tune or Ray Train). Use Ray Jobs API."</em></li>
+  </ul>
+
+  <h2>2. 關鍵路徑圖</h2>
   <p>從使用者呼叫到 gRPC 連線,一共七層。右欄標出每一層對旗標的副作用。</p>
 
   <div class="figure">
@@ -225,7 +295,93 @@
     <span><span class="sw sw-note"></span>一般呼叫鏈</span>
   </p>
 
-  <h2>2. 旗標是什麼、住在哪</h2>
+  <h2>3. <code>ray://</code> 到底是什麼</h2>
+  <p>一句話:<strong><code>ray://</code> 不是 wire protocol,是 URL scheme</strong>。而且這個 scheme 的「handler」是<strong>用 <code>importlib.import_module()</code> 動態 import 出來的 Python module</strong>。</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 900 450" role="img" aria-label="ray:// scheme 解析成 ClientBuilder 的流程">
+      <defs>
+        <marker id="arw3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <rect x="24" y="8" width="460" height="54" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="40" y="30" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">使用者寫的</text>
+      <text x="40" y="49" font-family="var(--font-mono)" font-size="14" fill="var(--ink)">ray://1.2.4.3:10001</text>
+
+      <rect x="24" y="100" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="40" y="122" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/_private/utils.py:1533  split_address()</text>
+      <text x="40" y="141" font-family="var(--font-mono)" font-size="13" fill="var(--ink)">('ray', '1.2.4.3:10001')</text>
+
+      <rect x="24" y="192" width="460" height="54" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="40" y="214" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/client_builder.py:365-374</text>
+      <text x="40" y="233" font-family="var(--font-mono)" font-size="13" fill="var(--ink)">importlib.import_module('ray') → ray.ClientBuilder</text>
+
+      <rect x="24" y="284" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="40" y="306" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">ray/client_builder.py:142  ClientBuilder.connect()</text>
+      <text x="40" y="325" font-family="var(--font-body)" font-size="14" fill="var(--ink)">組好 job_config / runtime_env,走 client_connect</text>
+
+      <rect x="24" y="376" width="460" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="40" y="398" font-family="var(--font-mono)" font-size="12" fill="var(--muted)">src/ray/protobuf/ray_client.proto:322</text>
+      <text x="40" y="417" font-family="var(--font-body)" font-size="14" fill="var(--ink)">gRPC → Ray Client Server → server 端真的 ray.init()</text>
+
+      <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw3)">
+        <path d="M254 62 V100"/>
+        <path d="M254 154 V192"/>
+        <path d="M254 246 V284"/>
+        <path d="M254 338 V376"/>
+      </g>
+
+      <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arw3)">
+        <path d="M484 35 H516"/>
+        <path d="M484 127 H516"/>
+        <path d="M484 219 H516"/>
+        <path d="M484 311 H516"/>
+        <path d="M484 403 H516"/>
+      </g>
+
+      <rect x="516" y="12" width="360" height="46" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="530" y="31" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">port 10001 = client server</text>
+      <text x="530" y="49" font-family="var(--font-body)" font-size="12" fill="var(--ink)">不是 GCS 6379,也不是 dashboard 8265</text>
+
+      <rect x="516" y="104" width="360" height="46" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="530" y="123" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">自己寫而不是 urllib</text>
+      <text x="530" y="141" font-family="var(--font-body)" font-size="12" fill="var(--ink)">PEP 允許 module 名有底線,URL scheme 不允許</text>
+
+      <rect x="516" y="196" width="360" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="530" y="215" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">scheme 就是 module 名</text>
+      <text x="530" y="233" font-family="var(--font-body)" font-size="12" fill="var(--ink)">任何暴露 ClientBuilder 的 module 都能當 transport</text>
+
+      <rect x="516" y="288" width="360" height="46" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="530" y="307" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">allow_multiple 在這裡決定</text>
+      <text x="530" y="325" font-family="var(--font-body)" font-size="12" fill="var(--ink)">True → set_context(None) 換新的 context</text>
+
+      <rect x="516" y="380" width="360" height="46" rx="8" fill="var(--code-bg)" stroke="var(--rule)"/>
+      <text x="530" y="399" font-family="var(--font-mono)" font-size="11" fill="var(--muted)">service RayletDriver</text>
+      <text x="530" y="417" font-family="var(--font-body)" font-size="12" fill="var(--ink)">Init / Schedule / GetObject / PutObject / KV*</text>
+    </svg>
+  </div>
+
+  <h3>各種 address 形式的差別</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>寫法</th><th>實際上在做什麼</th><th>driver 是誰</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">ray.init()</td><td>起一個 local cluster</td><td>C++ core worker(就本機)</td></tr>
+        <tr><td class="mono">ray.init("auto")</td><td>attach 到既有 cluster 的 GCS</td><td>C++ core worker(本機,只是接遠端 GCS)</td></tr>
+        <tr><td class="mono">ray.init("1.2.3.4:6379")</td><td>同上,直接給 GCS address</td><td>C++ core worker</td></tr>
+        <tr style="background:var(--accent-soft)"><td class="mono">ray.init("ray://1.2.3.4:10001")</td><td>走 gRPC 到 client server</td><td><strong>這個 python process 本身不是 core worker</strong></td></tr>
+        <tr><td class="mono">ray.init("http://…")</td><td>直接被擋下</td><td><code>client_builder.py:353-362</code> 明確報錯(可能是 RAY_ADDRESS 設成 API server)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>RAY_ADDRESS=ray://head:10001</code> 也會進 client mode —— <code>worker.py:1686-1694</code> 會用 env var 覆蓋 address。</p>
+  <div class="note">
+    <p><strong>為什麼這跟 flag 洩漏有關:</strong><code>ray://</code> 是<strong>開啟 client mode 的唯一入口</strong>。<code>worker.py:1696</code> 那個 <code>"://" in address</code> 的判斷就是分岔點,分岔之後旗標才會被打開。所以「<code>ray://</code> 是什麼」跟「client mode 為什麼會壞掉」是同一條線的兩端。</p>
+  </div>
+
+  <h2>4. 旗標是什麼、住在哪</h2>
   <p>分派開關只有一個,context 可以有很多個。這個落差是所有問題的根源。</p>
   <div class="tablewrap">
     <table>
@@ -241,7 +397,7 @@
     </table>
   </div>
 
-  <h2>3. 分派決策</h2>
+  <h2>5. 分派決策</h2>
   <p>每個被 <code>@client_mode_hook</code> 修飾的函式,在被呼叫時都會問一次這個問題。</p>
 
   <div class="figure">
@@ -303,7 +459,79 @@
     <p><strong>為什麼這重要:</strong>旗標壞掉時,<code>ray.get</code> / <code>ray.put</code> / <code>@ray.remote</code> 全部會改走本機路徑。旗標「卡在 True」時則相反:本機的 <code>ray.init()</code> 起來了,但所有操作都被轉去一個根本沒連上的 client。</p>
   </div>
 
-  <h2>4. 旗標的開關點(不對稱)</h2>
+  <h2>6. client mode 為什麼長成這樣</h2>
+  <p>要理解 flag 為什麼是 global、為什麼關不掉,得先知道它原本要解決什麼。原始設計出處是 PR #13031(barakmich, 2020-12),說明寫得很清楚:</p>
+<pre><code>RAY_CLIENT_MODE=1 python &lt;everyday ray file&gt;
+
+To wit, RAY_CLIENT_MODE=1 python ray/tune/examples/pbt_example.py works unmodified.
+
+"This finally allows exposure of the experimental ray client without
+modifying (much) ray code."</code></pre>
+  <p>唯一的設計約束:<strong>使用者跟第三方 library 寫的每一行 Ray 程式碼都不該需要改</strong>。其他一切都從這裡推導出來。</p>
+
+  <h3>為什麼是 decorator、而且分派在「呼叫時」</h3>
+  <p>最直覺的做法是到處塞 <code>if is_client_mode(): return client_impl(...)</code> —— 那要動到大量 Ray 內部程式碼,正好是 #13031 想避免的。所以做法變成把<strong>真實的</strong> <code>ray</code> module 的公開函式包一層:</p>
+<pre><code>def client_mode_hook(func):
+    def wrapper(*args, **kwargs):
+        if client_mode_enabled and _client_hook_enabled:
+            return getattr(ray, func.__name__)(*args, **kwargs)   # client 版的同名函式
+        return func(*args, **kwargs)
+    return wrapper</code></pre>
+  <p>分派靠 <code>func.__name__</code> 對應到 client stub 的同名 method —— 這就是為什麼 <code>ray/util/client/__init__.py</code> 要做一個形狀模仿 <code>ray</code> module 的 <code>RayAPIStub</code>。</p>
+
+  <h3>為什麼這個開關「必須」是 process-wide 的</h3>
+  <p>關鍵是時間軸:<code>import ray</code> 和 <code>@ray.remote</code> 發生在 <strong>module import 時</strong>,遠早於 <code>ray.init("ray://...")</code>;library 更可能在 import 期就宣告好 remote function。所以轉換被延遲到<strong>提交任務時</strong>才發生(<code>remote_function.py:369</code>):</p>
+<pre><code>if client_mode_should_convert():
+    return client_mode_convert_function(self, args, kwargs, **task_options)</code></pre>
+  <p><code>client_mode_hook.py:192-196</code> 的註解講得很直白:</p>
+  <p class="cap">python/ray/_private/client_mode_hook.py</p>
+<pre><code>The common case is to transparently convert that RemoteFunction
+to a ClientRemoteFunction. This happens in circumstances where a
+RemoteFunction is declared early, in a library and only then is Ray used
+in client mode -- necessitating a conversion.</code></pre>
+  <p>轉換結果還會 cache 在 function class 上(<code>RAY_CLIENT_MODE_ATTR</code>),並用 <code>_converted_key_exists</code> 對當前 session 驗證,因為同一個 interpreter 裡可能跨 client session 重用同一個 func_cls。</p>
+  <p><strong>為什麼不能是 thread-local 或 contextvar?</strong> 因為決策必須對整個 process 一致:library 裡宣告的 <code>@ray.remote</code> function、還沒 <code>ray.init()</code> 就存在的 actor class,都得一起變 client 版。宣告當下根本沒有「現在是哪個 client」的概念 —— 只有「這是什麼 mode」。</p>
+
+  <h3>三層狀態</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>狀態</th><th>範圍</th><th>誰在動</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">is_client_mode_enabled</td><td>process</td><td><code>ray.init("ray://…")</code>、<code>ray.client().connect()</code></td></tr>
+        <tr><td class="mono">_client_hook_status_on_thread</td><td>thread</td><td><code>disable_client_hook()</code>,給 client <strong>server</strong> 端用(server 要用真的 Ray API)</td></tr>
+        <tr><td class="mono">is_client_mode_enabled_by_default</td><td>process</td><td><code>RAY_CLIENT_MODE=1</code>,跑整個 test suite 用</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>#16731 做的事就是把「hook status」從 global 改成 thread-local(global 太粗),但<strong>mode 本身維持 global</strong>。</p>
+
+  <h3>結構性債與它的歷史</h3>
+  <p>mode 是 process-wide(1 個 flag),但<strong>連線是 per-context 的</strong>。<code>allow_multiple=True</code> 之後可以同時有好幾個 <code>_ClientContext</code>,各自一條 gRPC channel。一個 flag 沒辦法表達「我現在該對哪一條連線講話」—— 設計上直接推給 client stub 自己在呼叫時解析(<code>RayAPIStub._cxt.handler</code>)。</p>
+  <p>這個 punt 就是所有同類 bug 的溫床:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>時間</th><th>PR</th><th>事件</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">2020-12</td><td class="mono">#13031</td><td>起源:把 decorator 塞進真的 ray module</td></tr>
+        <tr><td class="mono">2021-02</td><td class="mono">#13639</td><td>「declared early」的轉換機制(現在的 <code>client_mode_convert_function</code>)</td></tr>
+        <tr><td class="mono">2021-04</td><td class="mono">#15257</td><td><em>"Don't leak a global enabling of client mode"</em> —— 同一個病的第一個實例</td></tr>
+        <tr><td class="mono">2021-06</td><td class="mono">#16731</td><td>hook status 改成 per-thread</td></tr>
+        <tr><td class="mono">2021-08</td><td class="mono">#17942</td><td><code>allow_multiple</code>:多個 context,還是一個 flag</td></tr>
+        <tr style="background:var(--warn-soft)"><td class="mono">2026-10</td><td class="mono">#67142</td><td>connect 失敗後 flag 卡住;而要關它時<strong>沒有任何 ownership 規則</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>「關的那一側」從來沒被設計過。整個 codebase 裡最接近 ownership rule 的就是 <code>RayAPIStub.disconnect()</code>:</p>
+<pre><code>if len(_all_contexts) == 0:
+    _explicitly_disable_client_mode()</code></pre>
+  <p>也就是「沒有任何 context 活著才關掉 mode」。而 <code>_ClientContext</code> 這層<strong>看不到</strong> <code>_all_contexts</code> —— 它只知道自己的 worker。這正是為什麼「在哪裡關」比「要不要關」更關鍵。</p>
+
+  <h3>如果要重新設計,方向是什麼</h3>
+  <p>不是去修「<code>_explicitly_disable_client_mode()</code> 該不該呼叫」,而是把「mode」從 process-wide boolean 收進 context 裡 —— <code>RayAPIStub</code> 已經有 thread-local 的 context 了。把「這條連線是 client」變成<strong>連線自己的性質</strong>,而不是整個 process 的性質,這樣 <code>allow_multiple</code>、失敗重連、測試 harness 三種情境就自然分開了。</p>
+  <p>現在它們全部擠在同一個 boolean 上 —— 這才是同一個病反覆長出來的原因。</p>
+  <p>不過這是架構層級的改動,遠超 <code>good-first-issue</code> 的範圍。<code>#67142</code> 能做的還是先修好那個 flag 的生命週期。</p>
+
+  <h2>7. 旗標的開關點(不對稱)</h2>
   <div class="tablewrap">
     <table>
       <thead><tr><th>位置</th><th>動作</th><th>條件</th></tr></thead>
@@ -321,7 +549,7 @@
   </div>
   <p>「開」有兩層條件(其中一層是 <code>_inside_client_test</code>),「關」原本都有「還有沒有別的 context 存活」的把關,這次修改是第一個不遵守這條規則的地方。</p>
 
-  <h2>5. 實測結果</h2>
+  <h2>8. 實測結果</h2>
   <p>用 stub 掉 <code>ray._raylet</code> 並替換掉 <code>Worker</code> 的 harness,直接驅動<strong>真正的</strong> Python 狀態機(旗標、分派判斷都是真的跑)。修改前後各跑一次同一組情境。</p>
   <p class="cap">harness:stub ray._raylet + FakeWorker(可控成功/失敗),不需 C++ build</p>
   <div class="tablewrap">
@@ -387,7 +615,7 @@ git -C /path/to/ray stash pop</code></pre>
   =&gt; A's client-mode dispatch still works? False</code></pre>
   </details>
 
-  <h2>6. 建議的改法</h2>
+  <h2>9. 建議的改法</h2>
   <p>把 <code>__init__.py:222</code> 拿掉,改在 <code>RayAPIStub.connect</code> 處理,條件比照既有的 <code>disconnect</code> / <code>shutdown</code>。</p>
   <p class="cap">python/ray/util/client/__init__.py · RayAPIStub.connect</p>
 <pre><code>def connect(self, *args, **kw_args):
@@ -409,25 +637,40 @@ git -C /path/to/ray stash pop</code></pre>
   <p>這一層同時滿足三件事:看得到 <code>_all_contexts</code>、看得到 <code>_inside_client_test</code>、而且失敗的 context 根本還沒被登記進去,所以 <code>len == 0</code> 正好就是「可以安全關旗標」的條件。</p>
   <p>副作用:<code>_ClientContext.init</code>(<code>__init__.py:299</code>)內部直接呼叫 <code>self.connect</code>,不經過 <code>RayAPIStub.connect</code>,那條路徑不會被這個保護涵蓋。<code>RayAPIStub.init</code>(<code>__init__.py:385</code>)可以加同樣的保護,看要不要一起做。</p>
 
-  <h2>7. 檔案地圖</h2>
+  <div class="note">
+    <p><strong>但 issue 已經改寫了,上面的方向可能不對。</strong>2026-10-20 23:17 issue 作者把標題從「<em>A failed ray:// connect leaves Ray Client mode on, breaking a later local ray.init()</em>」改成「<em>After a failed ray:// connect, ray.init() raises a bare AssertionError and an allow_multiple=True retry times out</em>」,body 也重寫,新增了一個 Explicit 的 Expected:</p>
+    <ol>
+      <li>A local <code>ray.init()</code> <strong>still fails</strong>, but with an error that says <code>Ray Client is already initialized.</code> instead of a bare <code>AssertionError</code>.</li>
+      <li><code>ray.init("ray://&lt;live address&gt;", allow_multiple=True)</code> <strong>connects</strong>.</li>
+    </ol>
+    <p>也就是說 issue 現在要的是<strong>旗標保持開著</strong>(否則 local init 會直接成功而不是「失敗但訊息清楚」),而是要讓錯誤訊息變清楚。這跟「connect 失敗就清掉旗標」是<strong>相反</strong>的方向。</p>
+    <p>而 <code>"Ray Client is already initialized."</code> 這句話在 master 上<strong>不存在</strong> —— 它只出現在 PR #67126(同一個作者)把 <code>util/client_connect.py:47</code> 的 <code>"Ray Client is already connected."</code> 改寫而來。所以 Expected #1 需要<strong>新寫程式碼</strong>,不是清旗標。</p>
+    <p>Expected #2(allow_multiple timeout)則跟這次修改無關;issue 作者說他沒找出根因,懷疑是 #67126 造成的(<code>#67126</code> 有動到 <code>util/client/worker.py</code> 與 <code>util/client_connect.py</code>),而且他沒在純 master 上重現過。</p>
+  </div>
+  <p><strong>值得先問作者的問題:</strong>「local <code>ray.init()</code> 應該失敗」真的是對的嗎?從使用者角度,「client 連線失敗了,換成本機跑」是很合理的需求,現在卻拿到一個無言的 AssertionError。如果改成「本機 <code>ray.init()</code> 成功,而且 client mode 乾淨地關掉」,其實比 issue 描述的期望更好 —— 現行的一行修改正好就是這樣。</p>
+
+  <h2>10. 檔案地圖</h2>
   <div class="tablewrap">
     <table>
       <thead><tr><th>檔案</th><th>在這條路徑上的角色</th></tr></thead>
       <tbody>
         <tr><td class="mono">python/ray/_private/worker.py</td><td><code>init()</code> 判斷 address 有沒有 protocol,有的話轉交 client builder</td></tr>
-        <tr><td class="mono">python/ray/client_builder.py</td><td>組出 builder;處理 <code>allow_multiple</code> 的 context 替換;被 <code>worker.py</code> 呼叫</td></tr>
+        <tr><td class="mono">python/ray/_private/utils.py</td><td><code>split_address()</code>:把 <code>"ray://host:port"</code> 拆成 <code>(scheme, inner)</code></td></tr>
+        <tr><td class="mono">python/ray/client_builder.py</td><td><code>importlib.import_module(scheme)</code> 取得 <code>ClientBuilder</code>;處理 <code>allow_multiple</code> 的 context 替換;被 <code>worker.py</code> 呼叫</td></tr>
         <tr><td class="mono">python/ray/util/client_connect.py</td><td>deprecated 公開 API;無條件打開旗標</td></tr>
         <tr><td class="mono">python/ray/util/client/__init__.py</td><td><code>RayAPIStub</code>(管 context 集合)與 <code>_ClientContext</code>(管一條連線);旗標開關的主要位置</td></tr>
         <tr><td class="mono">python/ray/util/client/worker.py</td><td>gRPC channel 與 <code>_server_init</code> / <code>connection_info</code></td></tr>
         <tr><td class="mono">python/ray/_private/client_mode_hook.py</td><td>旗標定義 + <code>client_mode_hook</code> 裝飾器 + 分派判斷</td></tr>
         <tr><td class="mono">python/ray/util/client/ray_client_helpers.py</td><td>測試 harness;靠 <code>_inside_client_test</code> 避免動到全域旗標</td></tr>
+        <tr><td class="mono">src/ray/protobuf/ray_client.proto</td><td>真正在線上跑的 protocol:<code>service RayletDriver</code></td></tr>
       </tbody>
     </table>
   </div>
 
-  <h2>8. 送 PR 前</h2>
+  <h2>11. 送 PR 前</h2>
   <ul>
-    <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code></li>
+    <li>先確認 issue 的方向:標題與 body 在 2026-10-20 被改寫過(見第 9 節),動工前最好先在 issue 上確認要修的是哪一版。</li>
+    <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code>(2026-10-20 查過,無結果)。</li>
     <li>測試要真的跑過(Ray dev build),並把指令與結果寫進 PR 描述。</li>
     <li>PR 描述要說明:為什麼不是重複 PR、跑了哪些測試、有使用 AI 協助。</li>
     <li>commit 加 <code>-s</code>(DCO),跑 <code>pre-commit run</code>。</li>
