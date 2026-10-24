@@ -211,7 +211,36 @@ ray.init()  # AssertionError</code></pre>
   </div>
   <p>這兩個都要在 Ray dev build 上實際跑過,才能說修好了。</p>
 
-  <h2>7. 送 PR 前(AGENTS.md)</h2>
+  <h2>7. 測試的坑:<code>from ... import</code> 拿到的是快照</h2>
+  <p class="meta">2026-10-24 寫回歸測試時踩到</p>
+  <p>第一版測試是這樣寫的:</p>
+<pre><code>from ray._private.client_mode_hook import is_client_mode_enabled
+...
+with pytest.raises(ConnectionError):
+    ray.init(f"ray://127.0.0.1:{find_free_port()}")
+assert not is_client_mode_enabled   # 永遠通過,修不修都一樣</code></pre>
+
+  <p class="q">為什麼永遠通過?</p>
+  <p><code>from X import name</code> 不是「連到」<code>X.name</code>,而是在 import 當下把它指向的物件,綁到<strong>測試 module 自己的</strong>名字上。import 時旗標是 <code>False</code>,所以測試裡的 <code>is_client_mode_enabled</code> 就是一個固定的 <code>False</code>。</p>
+  <p>之後 <code>_explicitly_enable_client_mode()</code> 用 <code>global is_client_mode_enabled</code> 重新賦值(<code>client_mode_hook.py:58-64</code>),改的只是 <code>client_mode_hook</code> module 裡的那個名字。bool 是 immutable,兩個名字從此各指各的,測試那份不會跟著變。</p>
+<pre><code>from ray._private import client_mode_hook
+from ray._private.client_mode_hook import (
+    is_client_mode_enabled, _explicitly_enable_client_mode,
+)
+
+_explicitly_enable_client_mode()
+print(is_client_mode_enabled)                   # False(快照)
+print(client_mode_hook.is_client_mode_enabled)  # True(真正的旗標)</code></pre>
+
+  <p class="q">那為什麼測試是在下一行 <code>assert ray.is_initialized()</code> 才失敗?</p>
+  <p>旗標的 assert 是假通過,bug 其實還在。旗標卡在 True 時,<code>ray.init()</code> 照樣會開本機 cluster(<code>init</code> 只有在 <code>RAY_CLIENT_MODE=1</code> 時才會被轉走),但 <code>ray.is_initialized()</code> 有 <code>@client_mode_hook</code>(<code>worker.py:2497</code>),會被轉到沒連上的 Ray Client,所以回傳 <code>False</code>。</p>
+
+  <div class="verdict">
+    <p><strong>規則:</strong>會被 <code>global</code> 重新賦值的 module-level 變數,一律透過 module 讀:<code>client_mode_hook.is_client_mode_enabled</code>。Ray 自己的 <code>client_mode_should_convert()</code> 也是在 module 內部讀它。</p>
+    <p><strong>檢查方式:</strong>把修正 revert 掉,回歸測試應該要在旗標那一行失敗。如果不會,這個 assert 就沒在測東西。</p>
+  </div>
+
+  <h2>8. 送 PR 前(AGENTS.md)</h2>
   <ul>
     <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code></li>
     <li>PR 描述寫清楚:為什麼不是重複的 PR、跑了哪些測試指令和結果、有使用 AI 協助。</li>

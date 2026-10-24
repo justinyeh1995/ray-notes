@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bazel in Ray</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F6;
+    --surface: #FFFFFF;
+    --ink: #14232B;
+    --muted: #55676F;
+    --rule: #D3DDDE;
+    --accent: #0B7A75;
+    --accent-soft: #DDF0EE;
+    --warn: #A94A16;
+    --warn-soft: #F7E6DB;
+    --code-bg: #E8EFEF;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E191E;
+      --surface: #142229;
+      --ink: #E2ECEE;
+      --muted: #93A5AC;
+      --rule: #26383F;
+      --accent: #4FC3BB;
+      --accent-soft: #123A3A;
+      --warn: #F0965E;
+      --warn-soft: #3A2417;
+      --code-bg: #1A2B32;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E191E;
+    --surface: #142229;
+    --ink: #E2ECEE;
+    --muted: #93A5AC;
+    --rule: #26383F;
+    --accent: #4FC3BB;
+    --accent-soft: #123A3A;
+    --warn: #F0965E;
+    --warn-soft: #3A2417;
+    --code-bg: #1A2B32;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+  }
+  main { max-width: 760px; margin-inline: auto; }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.3; }
+  h1 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; font-weight: 700; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  ul, ol { padding-left: 1.3em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 24px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 8px; }
+
+  .verdict { background: var(--accent-soft); border-radius: 6px; padding: 18px 20px; margin: 20px 0 8px; }
+  .verdict p:last-child, .verdict ul:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--accent); }
+
+  .q { font-weight: 700; margin: 32px 0 6px; }
+  .q::before { content: "Q  "; font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); letter-spacing: 0.06em; }
+
+  pre { background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 6px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; line-height: 1.55; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.6rem; }
+    body { padding-block: 28px 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ray · Build · Bazel</p>
+  <h1>Bazel in Ray</h1>
+  <p class="meta">整理自 2026-10-24 · 以 upstream master ce4256ec64 為準 · Bazel 7.5.0(透過 Bazelisk) · 相關:<a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a></p>
+
+  <div class="verdict">
+    <p><strong>一句話:</strong>Bazel 把 repo 切成很多 <em>package</em>(有 <code>BUILD.bazel</code> 的目錄),每個 package 裡宣告一堆 <em>target</em>,用 <code>//路徑:名字</code> 指名。你下的每個 <code>bazel build/run/test</code> 指令,都是在說「幫我把這個 target 和它依賴的東西弄到最新」。</p>
+    <ul>
+      <li>平常寫 Python:<code>pip install -e .</code> 之後改 <code>.py</code> 不用 build。</li>
+      <li>拉了新 commit,或改了 <code>.proto</code>/<code>.cc</code>/<code>.h</code>/<code>.pyx</code>:<code>bazel run //:gen_ray_pkg</code>。</li>
+      <li>跑測試:日常用 <code>pytest</code>;想照 CI 的方式跑才用 <code>bazel test //python/ray/tests:test_xxx</code>。</li>
+    </ul>
+  </div>
+
+  <h2>1. 心智模型:五個名詞</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>名詞</th><th>是什麼</th><th>Ray 裡的例子</th></tr></thead>
+      <tbody>
+        <tr><td>workspace</td><td>整個 repo 的根,有 <code>WORKSPACE</code> 檔。名字在 <code>gen_extract.py</code> 裡寫死成 <code>io_ray</code>。</td><td><code>~/ray/</code></td></tr>
+        <tr><td>package</td><td>任何有 <code>BUILD.bazel</code> 的目錄。它管到下一個有 BUILD 的子目錄為止。</td><td><code>python/ray/tests</code>、<code>src/ray/protobuf</code></td></tr>
+        <tr><td>target</td><td>BUILD 裡的一個 <code>name = "..."</code>。可以是 library、binary、test、檔案群組。</td><td><code>test_client_init</code>、<code>gen_ray_pkg</code></td></tr>
+        <tr><td>label</td><td>target 的全名:<code>//package:name</code>。同 package 內可以省成 <code>:name</code>。</td><td><code>//python/ray/tests:test_client_init</code>、<code>//:gen_ray_pkg</code></td></tr>
+        <tr><td>rule / macro</td><td>產生 target 的函式。rule 是 Bazel 內建或外部載入的;macro 是 <code>.bzl</code> 裡用 Starlark(長得像 Python)寫的包裝。</td><td><code>py_test</code>(rule)、<code>py_test_module_list</code>(macro)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>//</code> 代表 workspace 根目錄,所以 <code>//:gen_ray_pkg</code> 就是「根目錄那個 <code>BUILD.bazel</code> 裡叫 <code>gen_ray_pkg</code> 的 target」。</p>
+  <p>Label 的萬用寫法:<code>//python/ray/tests:all</code> 是該 package 的所有 target,<code>//python/ray/tests/...</code> 是該目錄底下所有 package 的所有 target。</p>
+
+  <h2>2. 設定檔怎麼讀</h2>
+
+  <h3><code>.bazelversion</code>:要用哪個 Bazel</h3>
+  <p>內容只有一行 <code>7.5.0</code>。你裝的 <code>bazel</code> 其實是 Bazelisk(v1.29.0),它會讀這個檔,自動下載並執行對應版本。所以不用自己管 Bazel 版本。</p>
+
+  <h3><code>WORKSPACE</code>:外部依賴</h3>
+  <p>宣告 grpc、protobuf、rules_python 這些外部套件從哪裡下載。<code>BUILD.bazel</code> 第一段 <code>load("@rules_python//python:defs.bzl", ...)</code> 裡的 <code>@rules_python</code> 就是在這裡定義的外部 repo。<code>@名字</code> 開頭的 label 一律指外部 repo。</p>
+  <p>Bazel 新版改用 <code>MODULE.bazel</code>(bzlmod),但 Ray 還沒換。<code>.bazelrc</code> 開頭的 <code>common --noenable_bzlmod</code> 就是在關掉它。</p>
+
+  <h3><code>.bazelrc</code>:預設 flag</h3>
+  <p>每一行的格式是 <code>指令[:config名] --flag</code>:</p>
+<pre><code>build --compilation_mode=opt        # 所有 build 都帶這個 flag
+test  --test_env=LC_ALL             # 所有 test 都帶
+build:debug -c dbg                  # 只有加了 --config=debug 才帶
+build:linux --cxxopt="-std=c++17"   # 平台 config,見下面</code></pre>
+  <ul>
+    <li><strong>沒有冒號的行</strong>每次都生效。所以 Ray 預設就是 <code>-c opt</code>(最佳化 build)。</li>
+    <li><strong><code>build:xxx</code></strong> 是一組具名設定,要用 <code>--config=xxx</code> 才會套用。Ray 定義了 <code>debug</code>、<code>asan</code>、<code>tsan</code>、<code>ci</code> 等。例如 <code>bazel build --config=debug //:ray_pkg</code>。</li>
+    <li><strong><code>build:linux</code>/<code>build:macos</code></strong> 比較特別:因為有 <code>build --enable_platform_specific_config</code>,Bazel 會依照你的作業系統自動套用。在 Linux 上不用加 <code>--config=linux</code>。</li>
+    <li><code>common</code> 套用到所有指令(build、test、run、query…)。<code>test</code> 會繼承 <code>build</code> 的設定。</li>
+  </ul>
+  <p class="cap">個人設定放這裡(.bazelrc:278)</p>
+<pre><code>try-import %workspace%/.user.bazelrc</code></pre>
+  <p>在 repo 根目錄建一個 <code>.user.bazelrc</code>(不會被 commit),就能加自己的 flag,不用改共用的 <code>.bazelrc</code>。也可以放在 <code>~/.bazelrc</code>。你目前兩個都沒有。機器記憶體不夠時,<code>/rebuild</code> skill 建議加:</p>
+<pre><code>build --local_ram_resources=HOST_RAM*.5 --local_cpu_resources=4
+build --disk_cache=~/bazel-cache</code></pre>
+
+  <h2>3. 四個指令</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>指令</th><th>做什麼</th><th>例子</th></tr></thead>
+      <tbody>
+        <tr><td><code>bazel build</code></td><td>產出 target 的檔案,放進 <code>bazel-bin/</code>。不會動到你的 source tree。</td><td><code>bazel build //src/ray/raylet:raylet</code></td></tr>
+        <tr><td><code>bazel run</code></td><td>先 build,再執行那個 binary。執行時會設 <code>BUILD_WORKSPACE_DIRECTORY</code>,所以程式可以寫回 repo。</td><td><code>bazel run //:gen_ray_pkg</code></td></tr>
+        <tr><td><code>bazel test</code></td><td>build 並執行 test target,結果在 <code>bazel-testlogs/</code>。</td><td><code>bazel test //python/ray/tests:test_client_init</code></td></tr>
+        <tr><td><code>bazel query</code></td><td>查 target 之間的關係,不 build 任何東西。</td><td>見第 6 節</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="q">為什麼 rebuild 用 <code>run</code> 不用 <code>build</code>?</p>
+  <p><code>bazel build</code> 只把結果放在 <code>bazel-bin/</code>(Bazel 自己的 cache 目錄),你的 <code>python/ray/</code> 不會變。<code>gen_ray_pkg</code> 是一個 Python 程式,<code>bazel run</code> 執行它時,它會把 build 好的 zip 解壓回 <code>python/ray/</code>(見第 4 節)。所以只有 <code>run</code> 才會更新你 editable install 實際 import 到的檔案。</p>
+
+  <p class="q"><code>Another command is running. Waiting for it to complete...</code></p>
+  <p>每個 workspace 只有一個 Bazel server,一次只能跑一個指令。你在一個終端機 build 時,另一個終端機的 <code>bazel</code> 指令(連 <code>bazel version</code> 都一樣)會排隊等。不是當掉了。</p>
+
+  <h3>repo 根目錄的 <code>bazel-*</code> symlink</h3>
+  <ul>
+    <li><code>bazel-bin</code> → build 產出(<code>~/.cache/bazel/.../bazel-out/k8-opt/bin</code>,<code>k8-opt</code> = x86_64 Linux + opt 模式)</li>
+    <li><code>bazel-out</code> → 所有模式的產出</li>
+    <li><code>bazel-testlogs</code> → <code>bazel test</code> 的 log</li>
+    <li><code>bazel-ray</code> → execroot,Bazel 實際執行 action 的地方</li>
+  </ul>
+  <p>這些都是 cache,可以整個刪掉。<code>bazel clean</code> 會清掉產出;<code>bazel clean --expunge</code> 連下載的外部依賴都清,下次 build 會很久。</p>
+
+  <h2>4. 讀根目錄的 <code>BUILD.bazel</code>:<code>gen_ray_pkg</code> 做了什麼</h2>
+  <p>從你最常跑的那個 target 往回追,就能看懂大部分的根 BUILD。</p>
+  <p class="cap">BUILD.bazel:465</p>
+<pre><code>py_binary(
+    name = "gen_ray_pkg",
+    srcs = ["gen_ray_pkg.py"],
+    data = [
+        ":ray_pkg_zip",       # C++ binary:raylet、gcs_server、_raylet.so
+        ":ray_py_proto_zip",  # 產生出來的 *_pb2.py
+    ],
+    deps = ["//bazel:gen_extract"],
+)</code></pre>
+  <ul>
+    <li><code>srcs</code>:這個程式自己的原始碼。</li>
+    <li><code>data</code>:執行時需要的檔案。Bazel 會先把它們 build 好,放進 runfiles 讓程式讀得到。</li>
+    <li><code>deps</code>:它 import 的其他 library。</li>
+  </ul>
+  <p><code>gen_ray_pkg.py</code> 很短:清掉 <code>python/ray/core/generated</code> 和 <code>python/ray/serve/generated</code>,再把這兩個 zip 解壓到 <code>python/</code>。</p>
+
+  <p class="cap">往回追 protobuf 那條線</p>
+<pre><code>src/ray/protobuf/common.proto
+  └─ //src/ray/protobuf:common_proto        proto_library      (protobuf/BUILD.bazel:9)
+      └─ //src/ray/protobuf:core_py_proto   python_grpc_compile (protobuf/BUILD.bazel:517)
+          └─ //:core_py_proto_files         pkg_files,前綴 ray/core/generated
+              └─ //:core_py_proto_zip       pkg_zip
+                  └─ //:ray_py_proto_zip    genrule,用 sed 修 import 路徑
+                      └─ //:gen_ray_pkg     py_binary,解壓到 python/</code></pre>
+  <p>Bazel 依照這條依賴鏈判斷要重做什麼。<code>common.proto</code> 一改,整條線都會重跑;沒改到的部分直接用 cache。</p>
+
+  <div class="note">
+    <p><strong>2026-10-24 踩到的坑:</strong>ray#65487 在 <code>common.proto</code> 加了 <code>disable_job_level_lineage_reconstruction</code>,但上次跑 <code>gen_ray_pkg</code> 是在那之前。Python 原始碼已經會讀這個 field,<code>python/ray/core/generated/common_pb2.py</code> 卻還是舊的,所以每個 <code>ray://</code> 連線都在 server 端拋 <code>AttributeError</code>。editable install 只會自動更新 <code>.py</code> 原始碼,不會更新 Bazel 產生的檔案。</p>
+  </div>
+
+  <p class="q">只想更新 protobuf,不想重編 C++?</p>
+  <p>根 BUILD 裡還有一個 <code>//:gen_py_proto</code>(<code>BUILD.bazel:453</code>)。它只解壓 <code>ray_py_proto.zip</code>,比 <code>gen_ray_pkg</code> 快很多。但如果同一批 commit 也改了 C++,<code>_raylet.so</code> 還是舊的,所以拉了一大批 commit 之後,保險的做法還是 <code>gen_ray_pkg</code>。</p>
+
+  <p class="q">BUILD 裡其他常見的 rule</p>
+  <ul>
+    <li><code>filegroup</code>:幫一群檔案取個名字,本身不做事。</li>
+    <li><code>alias</code>:另一個 target 的別名。搭配 <code>select({...})</code> 可以依平台指到不同 target,例如 <code>redis-server</code>。</li>
+    <li><code>genrule</code>:跑一段 shell(<code>cmd</code>),由 <code>srcs</code> 產出 <code>outs</code>。<code>$(location :x)</code> 會換成 <code>:x</code> 的實際路徑。</li>
+    <li><code>select()</code>:依照 config 選值。<code>"//conditions:default"</code> 是 fallback。</li>
+  </ul>
+
+  <h2>5. 讀 <code>python/ray/tests/BUILD.bazel</code></h2>
+
+  <h3><code>conftest</code>:為什麼 fixture 不用 import</h3>
+<pre><code>py_library(
+    name = "conftest",
+    srcs = glob(["**/conftest.py"]),
+    visibility = ["//python/ray/tests:__subpackages__", ...],
+)</code></pre>
+  <p>把所有 <code>conftest.py</code> 包成一個 library,每個測試的 <code>deps</code> 都會列 <code>":conftest"</code>。pytest 會自動載入 conftest 裡的 fixture(例如 <code>shutdown_only</code>),但 Bazel 只會把 <code>deps</code>/<code>data</code> 宣告過的檔案放進測試的 runfiles,也只看它們決定 cache 要不要失效,所以要明確宣告。</p>
+  <p><code>visibility</code> 控制誰能依賴這個 target。<code>__pkg__</code> 是只有那個 package,<code>__subpackages__</code> 是那個 package 加上所有子目錄。Ray 的規矩是能多私有就多私有,細節見 <code>bazel-visibility</code> skill。</p>
+
+  <h3><code>py_test_module_list</code>:一個檔案一個 test target</h3>
+  <p class="cap">python/ray/tests/BUILD.bazel:156</p>
+<pre><code>py_test_module_list(
+    size = "medium",
+    files = [
+        "test_client_builder.py",
+        "test_client_multi.py",
+        ...
+    ],
+    tags = ["custom_setup", "exclusive", "ray_client", "team:core"],
+    deps = [":conftest", "//:ray_lib"],
+)</code></pre>
+  <p>這不是 Bazel 內建的 rule,而是 <code>bazel/python.bzl:73</code> 定義的 macro,檔案開頭用 <code>load("//bazel:python.bzl", "py_test_module_list")</code> 載入。它做的事很簡單:</p>
+<pre><code>def py_test_module_list(files, size, deps, extra_srcs=[], name_suffix="", **kwargs):
+    for file in files:
+        name = paths.split_extension(file)[0] + name_suffix   # 去掉 .py
+        native.py_test(
+            name = name,
+            main = file,
+            srcs = extra_srcs + [file],
+            deps = deps,
+            size = size,
+            **kwargs                                          # tags、env 等原樣傳下去
+        )</code></pre>
+  <p>所以 <code>test_client_multi.py</code> 會變成 target <code>//python/ray/tests:test_client_multi</code>,同一個 list 裡的檔案共用 size、tags、deps。</p>
+
+  <p class="q">那 Bazel 怎麼跑 pytest?</p>
+  <p><code>main = file</code> 代表 Bazel 是直接 <code>python test_client_multi.py</code>,不是呼叫 pytest。這就是為什麼 Ray 每個測試檔最後都有:</p>
+<pre><code>if __name__ == "__main__":
+    sys.exit(pytest.main(["-sv", __file__]))</code></pre>
+  <p>少了這段,Bazel 執行那個檔案時什麼都不會跑,測試卻會顯示通過。</p>
+
+  <h3>參數的意思</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>參數</th><th>意思</th></tr></thead>
+      <tbody>
+        <tr><td><code>size</code></td><td><code>small</code>/<code>medium</code>/<code>large</code>/<code>enormous</code>,決定預設 timeout(60s/300s/900s/3600s)。CI 也用它分組。</td></tr>
+        <tr><td><code>tags = ["exclusive"]</code></td><td>Bazel 內建意義:這個測試不跟其他測試並行。會起 cluster 或動到全域狀態的測試要加。</td></tr>
+        <tr><td><code>tags = ["team:core"]</code></td><td>Ray 自己的慣例:哪個團隊負責。</td></tr>
+        <tr><td><code>tags = ["ray_client"]</code></td><td>Ray 自己的分組標籤,CI 用 <code>bazel query</code> 依 tag 挑測試(見第 6 節)。</td></tr>
+        <tr><td><code>tags = ["custom_setup"]</code></td><td>Ray CI 用來標記需要特別環境的測試。</td></tr>
+        <tr><td><code>env = {...}</code></td><td>測試的環境變數。例如有一組設 <code>RAY_CLIENT_MODE=1</code>,讓整批測試都走 client mode。</td></tr>
+        <tr><td><code>deps = ["//:ray_lib"]</code></td><td>根 BUILD 的註解說它是 dummy:把 <code>python/ray/**/*.py</code> 都列進來,任何 Ray 原始碼一改,這些測試的 cache 就失效,會重跑。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>什麼時候要改 BUILD?</h3>
+  <ul>
+    <li><strong>在現有測試檔裡加測試函式:</strong>不用。target 是以檔案為單位,新函式自動包含在內。這次 issue 67142 在 <code>test_client_multi.py</code> 加的測試就是這種。</li>
+    <li><strong>新增測試檔:</strong>要。把檔名加進適合的 <code>py_test_module_list</code> 的 <code>files</code>,不然 CI 根本不會跑它。挑 size 和 tags 跟它最像的那一組。</li>
+    <li><strong>新增 <code>.cc</code>/<code>.h</code>:</strong>要。加進對應的 <code>ray_cc_library</code> 的 <code>srcs</code>/<code>hdrs</code>。</li>
+  </ul>
+
+  <h2>6. <code>bazel query</code>:查不知道的事</h2>
+<pre><code># 某個檔案屬於哪個 test target?
+bazel query 'attr(main, test_client_multi.py, //python/ray/tests:*)'
+
+# tests 目錄有哪些 py_test?
+bazel query 'kind(py_test, //python/ray/tests:*)'
+
+# 有某個 tag 的測試(macOS CI 實際在用,ci/ray_ci/macos/macos_ci.sh:54)
+bazel query 'attr(tags, "ray_client", tests(//python/ray/tests/...))'
+
+# 這個 target 依賴什麼?
+bazel query 'deps(//:gen_ray_pkg, 2)'
+
+# 誰依賴 common_proto?(改 proto 前想知道影響範圍)
+bazel query 'rdeps(//..., //src/ray/protobuf:common_proto, 1)'
+
+# 看 macro 展開後的真正 target 長怎樣
+bazel query --output=build //python/ray/tests:test_client_multi</code></pre>
+  <p>最後一個最有用:它會印出 <code>py_test_module_list</code> 展開後的 <code>py_test(...)</code>,包含實際的 name、srcs、tags。看不懂某個 macro 時,用它看結果最快。</p>
+  <p>注意:<code>query</code> 也要 Bazel server,build 在跑的時候會排隊。</p>
+
+  <h2>7. pytest 還是 bazel test?</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th></th><th><code>pytest path::test</code></th><th><code>bazel test //...:target</code></th></tr></thead>
+      <tbody>
+        <tr><td>粒度</td><td>可以只跑一個函式</td><td>以檔案為單位。Ray 的測試檔用 <code>pytest.main(["-sv", __file__])</code>,不讀 <code>sys.argv</code>,所以 <code>--test_arg=-k</code> 傳不進去,沒辦法只跑一個函式</td></tr>
+        <tr><td>環境</td><td>你的 conda env、你的 working tree</td><td>sandbox,只看得到 <code>deps</code>/<code>data</code> 宣告的東西,套用 BUILD 的 env 和 tags</td></tr>
+        <tr><td>timeout</td><td><code>pytest.ini</code> 的 180s</td><td>依 <code>size</code></td></tr>
+        <tr><td>適合</td><td>開發時反覆跑</td><td>確認 CI 會怎麼跑、BUILD 有沒有寫對</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>兩種都要先把 build 弄到最新。pytest 不會幫你 rebuild,<code>bazel test</code> 也只 build 測試宣告的依賴,而 <code>//:ray_lib</code> 只是 <code>.py</code> 檔,不會觸發重編 <code>_raylet.so</code>。</p>
+
+  <h2>8. 速查</h2>
+<pre><code># 拉了新 commit 之後(最常用)
+bazel run //:gen_ray_pkg
+
+# 只有 proto 變了
+bazel run //:gen_py_proto
+
+# debug build(要用 gdb 時)
+bazel run --config=debug //:gen_ray_pkg
+
+# 只 build 一個 C++ binary
+bazel build //src/ray/gcs:gcs_server
+
+# 跑一個測試檔,照 CI 的方式
+bazel test //python/ray/tests:test_client_multi --test_output=errors
+
+# 看某個 target 的完整定義
+bazel query --output=build //python/ray/tests:test_client_multi</code></pre>
+</main>
+</body>
+</html>
