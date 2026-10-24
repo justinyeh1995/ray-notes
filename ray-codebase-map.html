@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ray Codebase Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F6;
+    --surface: #FFFFFF;
+    --ink: #14232B;
+    --muted: #55676F;
+    --rule: #D3DDDE;
+    --accent: #0B7A75;
+    --accent-soft: #DDF0EE;
+    --warn: #A94A16;
+    --warn-soft: #F7E6DB;
+    --code-bg: #E8EFEF;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E191E;
+      --surface: #142229;
+      --ink: #E2ECEE;
+      --muted: #93A5AC;
+      --rule: #26383F;
+      --accent: #4FC3BB;
+      --accent-soft: #123A3A;
+      --warn: #F0965E;
+      --warn-soft: #3A2417;
+      --code-bg: #1A2B32;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E191E;
+    --surface: #142229;
+    --ink: #E2ECEE;
+    --muted: #93A5AC;
+    --rule: #26383F;
+    --accent: #4FC3BB;
+    --accent-soft: #123A3A;
+    --warn: #F0965E;
+    --warn-soft: #3A2417;
+    --code-bg: #1A2B32;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+  }
+  main { max-width: 760px; margin-inline: auto; }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.3; }
+  h1 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; font-weight: 700; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  ul, ol { padding-left: 1.3em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 24px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 8px; }
+
+  .verdict { background: var(--accent-soft); border-radius: 6px; padding: 18px 20px; margin: 20px 0 8px; }
+  .verdict p:last-child, .verdict ul:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--accent); }
+
+  .q { font-weight: 700; margin: 32px 0 6px; }
+  .q::before { content: "Q  "; font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); letter-spacing: 0.06em; }
+
+  pre { background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 6px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; line-height: 1.55; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.6rem; }
+    body { padding-block: 28px 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ray · Codebase · 讀 code 前先看</p>
+  <h1>Ray Codebase Map</h1>
+  <p class="meta">整理自 2026-10-24 · 以 upstream master ce4256ec64 為準 · 相關:<a href="ray-bazel-notes.html">Bazel in Ray</a> · <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a></p>
+
+  <div class="verdict">
+    <p><strong>一句話:</strong>不用先把 codebase 讀懂。從你呼叫的 public API、traceback 或 log 下手,一次往回追一層。</p>
+    <ul>
+      <li><code>ray.xxx</code> 在哪:打開 <code>python/ray/__init__.py</code>,搜尋那個名字,看它從哪 import。</li>
+      <li><code>ray xxx</code> CLI 在哪:<code>python/ray/scripts/scripts.py</code>,找 <code>def xxx(</code>。</li>
+      <li>錯誤在哪:traceback 和 log 都印了檔名和行號,例如 <code>INFO worker.py:1842</code>。</li>
+      <li>某個函式的行為怪怪的:先看它有沒有掛 <code>@client_mode_hook</code> 之類的 decorator。</li>
+    </ul>
+  </div>
+
+  <h2>1. 怎麼找到程式碼</h2>
+
+  <h3>從 public API 往回追</h3>
+  <p><code>ray.init</code>、<code>ray.get</code> 這些 <code>ray.*</code> 都是在 <code>python/ray/__init__.py</code> 匯出的:</p>
+  <p class="cap">python/ray/__init__.py:114</p>
+<pre><code>from ray._private.worker import (  # noqa: E402,F401
+    ...
+    init,
+    ...
+)</code></pre>
+  <p>所以 <code>ray.init</code> 就是 <code>python/ray/_private/worker.py:1447</code> 的 <code>def init(</code>。</p>
+
+  <h3>從 CLI 往回追</h3>
+  <p><code>ray</code> 指令在 <code>python/setup.py:772</code> 註冊:</p>
+<pre><code>"console_scripts": [
+    "ray=ray.scripts.scripts:main",</code></pre>
+  <p>所以 <code>ray start</code> 是 <code>python/ray/scripts/scripts.py:801</code> 的 <code>def start(</code>,<code>ray stop</code> 是同檔 1344 行的 <code>def stop(</code>。每個子指令前面都有 <code>@cli.command()</code>。</p>
+
+  <h3>從 traceback 或 log 往回追</h3>
+<pre><code>File "python/ray/_private/node.py", line 2272, in _record_stats
+    assert ray.experimental.internal_kv._internal_kv_initialized()
+AssertionError</code></pre>
+<pre><code>2026-10-24 17:18:06,407 INFO worker.py:1842 -- Connecting to existing Ray cluster ...</code></pre>
+  <p>traceback 由下往上讀,最下面是出錯的那一行,往上是誰呼叫了它。Ray 的 log 格式是 <code>時間 等級 檔名:行號 -- 訊息</code>,行號直接告訴你是哪一行印的。</p>
+
+  <h3>用 grep 找定義</h3>
+<pre><code>git grep -n "def _record_stats" -- python
+# python/ray/_private/node.py:2270:    def _record_stats(self):
+
+git grep -n "Ray Client is already initialized" -- python
+# 從錯誤訊息找到拋錯的地方</code></pre>
+  <p><code>git grep</code> 只搜 git 追蹤的檔案,會跳過 <code>bazel-*</code> 那些巨大的 symlink 目錄,比 <code>grep -r</code> 快很多。</p>
+
+  <h2>2. 三層架構</h2>
+<pre><code>你的程式 / ray CLI
+   │
+   ▼
+Python API 層       python/ray/             ray.init、@ray.remote、ray.get…
+   │
+   ▼
+Cython 橋接         python/ray/_raylet.pyx   Python ↔ C++,build 出 _raylet.so
+   │
+   ▼
+C++ core           src/ray/                真正執行任務、管理物件</code></pre>
+  <p>改 Python 層的 <code>.py</code>,editable install 會自動生效。改 <code>_raylet.pyx</code> 或 <code>src/ray/</code>,或是 <code>.proto</code>,要 <code>bazel run //:gen_ray_pkg</code>,見 <a href="ray-bazel-notes.html">Bazel in Ray</a>。</p>
+
+  <h2>3. Python 端:<code>python/ray/</code></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>位置</th><th>負責什麼</th></tr></thead>
+      <tbody>
+        <tr><td><code>__init__.py</code></td><td>定義 <code>ray.*</code> 有哪些 public API,從各處 import 進來。<strong>找 API 的起點。</strong></td></tr>
+        <tr><td><code>_private/worker.py</code></td><td>driver 和 worker 的主邏輯:<code>init</code>、<code>shutdown</code>、<code>get</code>、<code>put</code>、<code>wait</code>、<code>is_initialized</code>。</td></tr>
+        <tr><td><code>_private/node.py</code></td><td>啟動並管理一個 node 上的各個 process(GCS、raylet、dashboard…)。<code>ray.init()</code> 起本機 cluster、<code>ray start</code> 都會用到。</td></tr>
+        <tr><td><code>_private/services.py</code></td><td>實際用 subprocess 啟動那些 process,解析 cluster address。</td></tr>
+        <tr><td><code>_private/client_mode_hook.py</code></td><td><code>@client_mode_hook</code> 和 client mode 旗標,決定一個呼叫要走本機還是 Ray Client。</td></tr>
+        <tr><td><code>_private/ray_constants.py</code></td><td>常數和環境變數名稱。</td></tr>
+        <tr><td><code>_private/authentication/</code></td><td>token auth(<code>RAY_AUTH_MODE</code>)。</td></tr>
+        <tr><td><code>_private/runtime_env/</code></td><td><code>runtime_env</code>:pip、conda、working_dir、env_vars 等。</td></tr>
+        <tr><td><code>scripts/scripts.py</code></td><td><code>ray</code> CLI:<code>start</code>、<code>stop</code>、<code>status</code>、<code>kill-actor</code>…</td></tr>
+        <tr><td><code>util/client/</code></td><td><strong>Ray Client</strong>(<code>ray://</code>)。<code>__init__.py</code> 管 context(<code>_ClientContext</code>、<code>RayAPIStub</code>);<code>worker.py</code> 是 client 端的連線和 RPC;<code>server/</code> 是 server 端(含 <code>proxier.py</code>)。</td></tr>
+        <tr><td><code>client_builder.py</code>、<code>util/client_connect.py</code></td><td><code>ray.init("ray://...")</code> 進入 Ray Client 的入口,<code>allow_multiple</code> 在這裡處理。</td></tr>
+        <tr><td><code>experimental/internal_kv.py</code></td><td>存在 GCS 裡的 key-value store。</td></tr>
+        <tr><td><code>exceptions.py</code></td><td>Ray 的例外類別。</td></tr>
+        <tr><td><code>actor.py</code>、<code>remote_function.py</code></td><td><code>@ray.remote</code> 的 actor 和 task。</td></tr>
+        <tr><td><code>job_config.py</code></td><td><code>JobConfig</code>,轉成 protobuf 送給 GCS。</td></tr>
+        <tr><td><code>_raylet.pyx</code>、<code>includes/</code></td><td>Cython,把 C++ 的 CoreWorker 包成 Python 物件。</td></tr>
+        <tr><td><code>core/generated/</code></td><td>從 <code>.proto</code> 產生的 <code>*_pb2.py</code>。不要手改,用 Bazel 重新產生。</td></tr>
+        <tr><td><code>dashboard/</code></td><td>dashboard 後端;前端在 <code>dashboard/client/</code>。</td></tr>
+        <tr><td><code>autoscaler/</code></td><td>自動增減 node。</td></tr>
+        <tr><td><code>data/</code>、<code>serve/</code>、<code>train/</code>、<code>tune/</code>、<code>rllib/</code></td><td>建在 core 上的函式庫,各自獨立,各有自己的 <code>tests/</code>。</td></tr>
+        <tr><td><code>tests/</code></td><td>core 的測試,<code>conftest.py</code> 裡有 <code>shutdown_only</code>、<code>call_ray_start</code> 等 fixture。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>4. C++ 端:<code>src/ray/</code></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>位置</th><th>負責什麼</th></tr></thead>
+      <tbody>
+        <tr><td><code>gcs/</code></td><td><strong>GCS</strong>(Global Control Service)。整個 cluster 的中央服務,記錄 node、actor、job、placement group,也提供 internal KV。一個 cluster 只有一個,在 head node 上。</td></tr>
+        <tr><td><code>raylet/</code></td><td><strong>raylet</strong>。每個 node 一個,在這個 node 上排程任務、管理 worker process 和資源。</td></tr>
+        <tr><td><code>core_worker/</code></td><td><strong>CoreWorker</strong>。每個 driver 或 worker process 裡的 C++ 核心,負責送任務、追蹤物件參考。<code>_raylet.pyx</code> 包的就是它。</td></tr>
+        <tr><td><code>object_manager/</code></td><td>在 node 之間傳物件,管理 object store(plasma)。</td></tr>
+        <tr><td><code>rpc/</code>、<code>*_rpc_client/</code></td><td>gRPC server 和 client 的封裝。</td></tr>
+        <tr><td><code>protobuf/</code></td><td>所有 <code>.proto</code> 定義,Python 和 C++ 共用。</td></tr>
+        <tr><td><code>pubsub/</code>、<code>ray_syncer/</code></td><td>node 之間同步狀態。</td></tr>
+        <tr><td><code>common/</code>、<code>util/</code></td><td>共用工具。</td></tr>
+        <tr><td><code>design_docs/</code></td><td>設計文件。看不懂某個元件時可以先找這裡。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>5. 一個 cluster 裡有哪些 process</h2>
+  <p><code>ray start --head</code> 之後,<code>ray stop</code> 會說停掉了幾個 process。它們大致是:</p>
+  <ul>
+    <li><code>gcs_server</code>(C++,只在 head node):cluster 的中央服務,預設 port 6379。</li>
+    <li><code>raylet</code>(C++,每個 node):本機排程。</li>
+    <li>dashboard、dashboard agent、log monitor 等 Python process。dashboard 預設在 8265。</li>
+    <li>Ray Client server:<code>ray start --head</code> 預設開在 10001,<code>ray://</code> 連的就是它。本機 <code>ray.init()</code> 不會開這個。</li>
+  </ul>
+  <p>你的 driver(跑 <code>ray.init()</code> 的那個 Python process)裡面也有一個 CoreWorker。<code>@ray.remote</code> 的 task 和 actor 跑在 raylet 起的 worker process 裡,每個 worker 也各有一個 CoreWorker。</p>
+
+  <h2>6. 走過一次:issue 67142</h2>
+<pre><code>ray.init("ray://...")                 _private/worker.py:1697   "://" 分支
+  └─ ClientBuilder.connect            client_builder.py
+      └─ client_connect.connect       util/client_connect.py
+          └─ _ClientContext.connect   util/client/__init__.py:162  開啟旗標
+              └─ 連線失敗,旗標沒被關
+
+ray.init()                            _private/worker.py        本機路徑  ← 修在這裡
+  └─ Node(...)                        _private/node.py
+      └─ _record_stats                node.py:2270
+          └─ _internal_kv_initialized()   experimental/internal_kv.py:28  @client_mode_hook
+              └─ 被轉到沒連上的 client → False → AssertionError</code></pre>
+  <p>追的順序:traceback 指到 <code>_record_stats</code> → 看它 assert 的函式 → 發現掛了 <code>@client_mode_hook</code> → 去看 hook 用什麼條件決定轉不轉 → 找到全域旗標 → 找誰開、誰關這個旗標。</p>
+
+  <div class="note">
+    <p><strong>深層的 assert 通常只是症狀。</strong>先問「它檢查的東西為什麼是錯的」,一路往回追到狀態第一次出錯的地方,再決定是修源頭,還是在最早能察覺的入口擋下來。只修 assert 那一行,錯誤通常會換個地方再冒出來。</p>
+  </div>
+
+  <h2>7. 容易踩的坑</h2>
+  <ul>
+    <li><strong>decorator 會改變行為。</strong><code>@client_mode_hook</code> 會在 client mode 時把呼叫轉到 Ray Client,所以函式本體寫的不一定是實際執行的。<code>@PublicAPI</code>、<code>@DeveloperAPI</code> 只是標記 API 的穩定程度。</li>
+    <li><strong>同名的檔案很多。</strong><code>_private/worker.py</code>(driver/worker)和 <code>util/client/worker.py</code>(Ray Client 的 client 端)完全是兩回事。看 traceback 時要看完整路徑。</li>
+    <li><strong>module 層級的全域變數。</strong>像 <code>client_mode_hook.is_client_mode_enabled</code> 這種用 <code>global</code> 改的變數,要透過 module 讀,<code>from ... import</code> 拿到的是快照,見 <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142</a> 第 7 節。</li>
+    <li><strong>Python 和 build 不同步。</strong>原始碼是新的,不代表 <code>_raylet.so</code> 和 <code>core/generated/</code> 也是新的。拉了新 commit 之後出現奇怪的 <code>AttributeError</code>,先懷疑 build。</li>
+    <li><strong>server 和 client 可能在同一個 process。</strong>Ray Client 的測試和 helper 會在同一個 process 裡同時跑 server 和 client,靠 <code>disable_client_hook()</code> 區分。在 <code>ray.init</code> 加檢查時要考慮這種情況。</li>
+  </ul>
+</main>
+</body>
+</html>

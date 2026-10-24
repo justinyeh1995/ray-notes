@@ -113,6 +113,10 @@
     </ul>
   </div>
 
+  <div class="note">
+    <p><strong>2026-10-24 更新:issue 已改版,第 1 到 6 節依據的是舊版。</strong>作者跟 Rueian 討論後改了 title 和預期行為:失敗後的本機 <code>ray.init()</code> 要<strong>繼續失敗</strong>,但改成拋 <code>Ray Client is already initialized.</code>,而不是重設旗標讓它成功。第 5 節的修法因此不再適用。新的範圍和 #2 的來源見<a href="#update-1024">第 8 節</a>。</p>
+  </div>
+
   <h2>1. Issue 在講什麼</h2>
 
   <p class="q">症狀是什麼?</p>
@@ -240,7 +244,87 @@ print(client_mode_hook.is_client_mode_enabled)  # True(真正的旗標)</code></
     <p><strong>檢查方式:</strong>把修正 revert 掉,回歸測試應該要在旗標那一行失敗。如果不會,這個 assert 就沒在測東西。</p>
   </div>
 
-  <h2>8. 送 PR 前(AGENTS.md)</h2>
+  <h2 id="update-1024">8. Issue 改版之後:#2 的來源與新範圍</h2>
+  <p class="meta">2026-10-24 · 在 upstream master ce4256ec64 上驗證(已包含 ray#67126)</p>
+
+  <h3>新版 issue</h3>
+  <p>標題:<em>[Core] After a failed ray:// connect, ray.init() raises a bare AssertionError and an allow_multiple=True retry times out</em></p>
+  <ol>
+    <li><strong>#1:</strong>失敗後的本機 <code>ray.init()</code> 仍然要失敗,但錯誤訊息要是 <code>Ray Client is already initialized.</code>,不能是不帶訊息的 <code>AssertionError</code>。</li>
+    <li><strong>#2:</strong>失敗後用 <code>ray.init("ray://&lt;live address&gt;", allow_multiple=True)</code> 重連要成功,不能 <code>ConnectionError: ray client connection timeout</code>。作者寫了「還沒找到原因」,而且只在 ray#67126 的 <code>cd9a46ee9a</code> 上看過。</li>
+  </ol>
+  <p>issue 裡說 <code>RayAPIStub.connect</code> 先開旗標、在 <code>except</code> 裡只呼叫 per-context 的 <code>disconnect()</code>。實際上這兩件事都在 <code>_ClientContext.connect</code>(<code>__init__.py:159-162</code>、<code>:221-223</code>),<code>RayAPIStub.connect</code> 沒有 <code>except</code>。</p>
+
+  <h3>在 master 上的 repro 結果</h3>
+  <p class="cap">先 RAY_AUTH_MODE=disabled ray start --head,再跑 issue 的完整 script</p>
+<pre><code>ray:// connect failed: ConnectionError ray client connection timeout
+client mode enabled after failure: True
+local ray.init() failed: AssertionError AssertionError()
+allow_multiple connect OK after 2.3s: ClientContext(...)</code></pre>
+  <ul>
+    <li><strong>#1 還在。</strong>旗標卡在 True,本機 <code>ray.init()</code> 跑到 <code>node.py</code> 的 <code>_record_stats</code> 才 assert 失敗。</li>
+    <li><strong>#2 重現不出來。</strong>中間那一步本機 <code>ray.init()</code> 失敗也照做了,<code>allow_multiple</code> 重連 2.3 秒就成功。</li>
+  </ul>
+  <div class="note">
+    <p>第一次跑時,每個 <code>ray://</code> 連線都在 server 端拋 <code>AttributeError: Protocol message JobConfig has no "disable_job_level_lineage_reconstruction" field</code>。原因是 build 比原始碼舊,跟 issue 無關。<code>bazel run //:gen_ray_pkg</code> 之後就正常了,見 <a href="ray-bazel-notes.html">Bazel in Ray</a> 第 4 節。</p>
+  </div>
+
+  <h3>ray#67126 的時間線(作者:Chi-Sheng Liu)</h3>
+  <p>issue 作者和 ray#67126 的作者是同一人。他在 PR 裡自己的 commit(時間為 UTC):</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>時間</th><th>commit</th><th>做了什麼</th><th>跟 #67142 的關係</th></tr></thead>
+      <tbody>
+        <tr><td>10/17 02:48</td><td><code>acb319555a</code></td><td>PR 主體:沒有 token 或 token 被拒時,node 和 client 立刻失敗並給出修法</td><td>無</td></tr>
+        <tr><td>10/17 06:13</td><td><code>e6763effe2</code></td><td><code>ray://</code> 重連被拒時拋 <code>AuthenticationError</code>;<code>serve controller-health</code> 保留這個錯誤</td><td>無</td></tr>
+        <tr><td>10/17 06:26</td><td><code>767020f86f</code></td><td>重連被拒時,還在等的 future 也拋 <code>AuthenticationError</code></td><td>無</td></tr>
+        <tr><td>10/18 09:54</td><td><code>5c98c7a740</code></td><td>在 <code>test_ray_client_checks_token_before_connecting</code> 的 <code>finally</code> 加 <code>ray.util.disconnect()</code></td><td><strong>#1 在這裡發現</strong></td></tr>
+        <tr><td>10/20 21:41</td><td><code>cd9a46ee9a</code></td><td>被拒的 client 會一直記住這個狀態,下次連線前自動斷開</td><td><strong>#2 在這上面看到</strong></td></tr>
+        <tr><td>10/20 23:17</td><td>(issue 最後更新)</td><td></td><td>cd9a 之後約 1.5 小時</td></tr>
+        <tr><td>10/21 00:19</td><td><code>bcf407c9ac</code></td><td>拿掉 cd9a 裡自動斷開被拒 client 的部分,改成只停止 retry</td><td><strong>#2 在這裡消失</strong></td></tr>
+        <tr><td>10/21 18:23</td><td><code>823da43263</code></td><td>squash merge 進 master</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="q"><code>5c98c7a740</code>:#1 是怎麼被發現的</p>
+<pre><code>    try:
+        with pytest.raises(AuthenticationError, match="ray get-auth-token"):
+            ray.init(f"ray://127.0.0.1:{find_free_port()}")
+    finally:
+        # A failed ray:// connect leaves client mode on; later tests in this
+        # process would then route ray.init through the client.
+        ray.util.disconnect()</code></pre>
+  <p>跟 <code>test_ray_init.py:175</code> 的 <code>test_ray_init_credential</code> 是同一種 workaround。</p>
+
+  <p class="q"><code>cd9a46ee9a</code> 加了什麼(#2 的嫌疑)</p>
+  <ul>
+    <li><code>Worker._rejection</code> 和 <code>Worker._reject(e)</code>:記下 <code>AuthenticationError</code>,之後每個呼叫都會再拋。</li>
+    <li><code>Worker.is_connected()</code> 多了 <code>and self._rejection is None</code>。</li>
+    <li><code>_ClientContext.__getattr__</code> 的 rejection 分支:對 <code>is_initialized</code>、<code>_internal_kv_initialized</code> 回傳 <code>True</code>,其他屬性一律 raise。</li>
+    <li><code>_disconnect_if_rejected()</code>:在 <code>client_connect.connect</code> 開頭和 <code>ClientBuilder.connect</code> 開頭(<code>allow_multiple</code> 的路徑)各呼叫一次。</li>
+    <li><code>ClusterInfo</code> 收到 <code>UNAUTHENTICATED</code> 就轉成 rejection。</li>
+  </ul>
+
+  <p class="q"><code>bcf407c9ac</code> 拿掉了什麼</p>
+  <ul>
+    <li><strong>拿掉:</strong><code>_disconnect_if_rejected()</code> 和它的兩個呼叫點、<code>__getattr__</code> 的 rejection 分支、<code>is_connected()</code> 的 rejection 條件。</li>
+    <li><strong>保留但改了用途:</strong><code>_rejection</code> 和 <code>_reject()</code> 還在,改成讓 call/get 的 retry 迴圈在被拒後直接停止。</li>
+    <li><strong>錯誤訊息:</strong><code>client_connect.py</code> 的 <code>"Ray Client is already connected."</code>(2021 年 eb6f403b97 留下的)改成 <code>"Ray Client is already initialized."</code>。</li>
+  </ul>
+  <p>merge 後的 PR 描述寫道:<em>"Calling <code>ray.init("ray://...")</code> a second time still needs <code>ray.util.disconnect()</code> first, as before this PR, but the error now says "Ray Client is already initialized" instead of "already connected"."</em> issue 預期 #1 用的就是這段新訊息。</p>
+
+  <div class="verdict">
+    <p><strong>結論:</strong>#2 很可能是 <code>cd9a46ee9a</code> 帶進來、<code>bcf407c9ac</code> 在 merge 前拿掉的,從來沒進過 master。#1 不受 ray#67126 影響,還在。</p>
+    <ul>
+      <li><strong>尚未驗證:</strong><code>cd9a46ee9a</code> 裡具體是哪一項讓 <code>allow_multiple</code> timeout。嫌疑最大的是 <code>ClientBuilder.connect</code> 開頭的 <code>_disconnect_if_rejected()</code> 和 <code>is_connected()</code> 的改動。要確認的話,可以在目前的 tree 上反向套用 <code>bcf407c9ac</code> 的 client <code>.py</code> 改動再跑 repro。</li>
+      <li><strong>PR 範圍:</strong>只做 #1。在本機 <code>ray.init()</code> 的路徑(<code>worker.py</code> 的 <code>"://"</code> 分支之後)檢查 <code>client_mode_hook.is_client_mode_enabled</code>,是 True 就拋 <code>RuntimeError("Ray Client is already initialized. ...")</code>,並提示 <code>ray.util.disconnect()</code>。</li>
+      <li><strong>測試:</strong>#1 的測試放 <code>test_ray_init.py</code>。<code>test_client_multi.py</code> 那個「失敗後用 <code>allow_multiple</code> 重連」的測試在 master 上本來就會過,留著當防回歸測試,確認 #1 的新檢查不會擋到 <code>ray://</code> 的路徑。</li>
+      <li><strong>issue 回報:</strong>附上 ce4256ec64 上的 repro 輸出,指出 <code>cd9a46ee9a</code> 和 <code>bcf407c9ac</code>,請作者確認 #2 是否屬於 ray#67126。</li>
+    </ul>
+  </div>
+
+  <h2>9. 送 PR 前(AGENTS.md)</h2>
   <ul>
     <li>查重複:<code>gh pr list --repo ray-project/ray --state open --search "67142 in:body"</code></li>
     <li>PR 描述寫清楚:為什麼不是重複的 PR、跑了哪些測試指令和結果、有使用 AI 協助。</li>
