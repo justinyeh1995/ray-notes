@@ -242,7 +242,170 @@ ray.init()                            _private/worker.py        本機路徑  �
     <li><strong>module 層級的全域變數。</strong>像 <code>client_mode_hook.is_client_mode_enabled</code> 這種用 <code>global</code> 改的變數,要透過 module 讀,<code>from ... import</code> 拿到的是快照,見 <a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142</a> 第 7 節。</li>
     <li><strong>Python 和 build 不同步。</strong>原始碼是新的,不代表 <code>_raylet.so</code> 和 <code>core/generated/</code> 也是新的。拉了新 commit 之後出現奇怪的 <code>AttributeError</code>,先懷疑 build。</li>
     <li><strong>server 和 client 可能在同一個 process。</strong>Ray Client 的測試和 helper 會在同一個 process 裡同時跑 server 和 client,靠 <code>disable_client_hook()</code> 區分。在 <code>ray.init</code> 加檢查時要考慮這種情況。</li>
+    <li><strong>IDE 跳到定義時跳到 <code>.pyi</code>。</strong>看到函式本體是 <code>...</code> 不代表它是空的,那只是型別提示檔。真正的實作在 <code>.pyx</code> 或 <code>.pxi</code>,見第 8 節。</li>
   </ul>
+
+  <h2>8. Cython 與相關副檔名</h2>
+  <p>大部分 issue 只需要 Python。只有 trace 到 <code>ray._raylet</code> 的東西時,才需要<strong>看得懂</strong>一點 Cython,不用會寫。</p>
+
+  <h3>副檔名一覽</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>副檔名</th><th>是什麼</th><th>類比</th><th>Ray 裡的例子</th></tr></thead>
+      <tbody>
+        <tr><td><code>.py</code></td><td>一般 Python</td><td></td><td><code>_private/worker.py</code></td></tr>
+        <tr><td><code>.pyi</code></td><td>型別提示檔(type stub),只有簽名,本體都是 <code>...</code>。給 mypy、pyright、IDE 用,執行時不會被讀</td><td></td><td><code>_raylet.pyi</code>、<code>includes/object_ref.pyi</code>、<code>includes/unique_ids.pyi</code>(全 repo 只有這 3 個)</td></tr>
+        <tr><td><code>.pyx</code></td><td>Cython 原始碼,會被編譯</td><td>C++ 的 <code>.cc</code></td><td><code>_raylet.pyx</code>(約 5500 行)</td></tr>
+        <tr><td><code>.pxi</code></td><td>Cython 的 include 檔,用 <code>include "..."</code> 直接貼進 <code>.pyx</code></td><td>直接貼進來的程式碼片段</td><td><code>includes/object_ref.pxi</code>,在 <code>_raylet.pyx:187</code> 被 include</td></tr>
+        <tr><td><code>.pxd</code></td><td>Cython 的宣告檔,宣告 C++ 的類別和函式,讓 Cython 能呼叫</td><td>C++ 的 <code>.h</code></td><td><code>includes/libcoreworker.pxd</code></td></tr>
+        <tr><td><code>.so</code></td><td>編譯出來、可以直接 <code>import</code> 的二進位模組(Linux/macOS)</td><td></td><td><code>_raylet.so</code></td></tr>
+        <tr><td><code>.pyd</code></td><td>同上,Windows 版,其實是一個 DLL</td><td></td><td>Windows 上 BUILD 會把 <code>_raylet.so</code> 改名成 <code>_raylet.pyd</code>(<code>BUILD.bazel:268</code>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+<pre><code>.pyx + .pxi  ──┐
+               ├─ Cython → C++ 編譯器 ─→  _raylet.so(Windows: _raylet.pyd)
+.pxd(宣告)  ──┘
+
+.pyi  手寫的,描述 _raylet.so 裡有什麼,給工具看</code></pre>
+  <p><code>.pyi</code> 第一行常會寫來源,例如 <code>includes/object_ref.pyi</code> 開頭是 <code># source: object_ref.pxi</code>。</p>
+
+  <h3>讀 <code>.pyx</code> 只要認得這幾個</h3>
+  <p class="cap">python/ray/_raylet.pyx:3483,CoreWorker.get_objects</p>
+<pre><code>    def get_objects(self, object_refs, int64_t timeout_ms=-1):
+        cdef:
+            c_vector[shared_ptr[CRayObject]] results
+            c_vector[CObjectID] c_object_ids = ObjectRefsToVector(object_refs)
+        with nogil:
+            op_status = CCoreWorkerProcess.GetCoreWorker().Get(
+                c_object_ids, timeout_ms, results)
+        check_status(op_status)
+
+        return RayObjectsToSerializedRayObjects(results, object_refs)</code></pre>
+  <ul>
+    <li><code>def</code>:一般的函式,Python 可以呼叫。參數可以帶 C 型別,例如 <code>int64_t timeout_ms</code>。</li>
+    <li><code>cdef</code>:只在 Cython 和 C 裡用的函式或變數,Python 看不到。<code>cdef:</code> 區塊是在宣告 C++ 型別的區域變數。</li>
+    <li><code>c_vector</code>、<code>shared_ptr</code>:就是 C++ 的 <code>std::vector</code>、<code>std::shared_ptr</code>。</li>
+    <li><code>C</code> 開頭的名字(<code>CObjectID</code>、<code>CRayObject</code>、<code>CCoreWorkerProcess</code>):C++ 類別,宣告在 <code>includes/*.pxd</code>。</li>
+    <li><code>with nogil:</code>:放開 Python 的 GIL,裡面通常就是呼叫 C++ 的地方。</li>
+    <li><code>check_status(...)</code>:把 C++ 回傳的 <code>Status</code> 轉成 Python 例外。</li>
+  </ul>
+
+  <h3>從 Python 一路追到 C++:以 <code>ray.get</code> 為例</h3>
+<pre><code>ray.get(ref)
+  └─ _private/worker.py:1008       self.core_worker.get_objects(...)
+      └─ _raylet.pyx:3483          def get_objects → CCoreWorkerProcess.GetCoreWorker().Get(...)
+          └─ includes/libcoreworker.pxd:497
+                                   cdef cppclass CCoreWorkerProcess "ray::core::CoreWorkerProcess"
+                                   (引號裡是它在 C++ 裡的真正名字)
+              └─ src/ray/core_worker/core_worker.h:759
+                                   Status Get(const std::vector&lt;ObjectID&gt; &amp;ids, ...)</code></pre>
+  <p>追到 <code>.pyx</code> 裡呼叫 C++ 的那一行,通常就可以停下來了,只要知道「這裡在呼叫 C++ 的 <code>CoreWorker::Get</code>」。真的要往下看,就去 <code>.pxd</code> 找 <code>cdef extern from "某個.h"</code>,知道要去 <code>src/ray/</code> 的哪個檔案,再找同名的函式。</p>
+
+  <h2>9. 用 pdb 追 code</h2>
+  <p>想知道程式實際走哪條路時,不要從頭讀到尾,讓 pdb 帶你走。以下指令都在 2026-10-25 實際跑過。</p>
+
+  <h3>方法一:在分岔點下 breakpoint</h3>
+<pre><code>conda activate ray-py-3-10
+RAY_AUTH_MODE=disabled python -m pdb ~/adhoc/repro_67142_point_2.py
+
+(Pdb) b /home/justinyeh1995_gmail_com/ray/python/ray/_private/worker.py:1871
+(Pdb) c</code></pre>
+  <p class="cap">實際輸出</p>
+<pre><code>[repro] step 1: failed as expected: ConnectionError: ray client connection timeout
+&gt; .../ray/_private/worker.py(1871)init()
+-&gt; if bootstrap_address is None:
+(Pdb) p bootstrap_address
+None
+(Pdb) from ray._private import client_mode_hook as h
+(Pdb) p h.is_client_mode_enabled
+True
+(Pdb) w
+  .../repro_67142_point_2.py(10)&lt;module&gt;()
+-&gt; ray.init()
+  .../ray/_private/client_mode_hook.py(134)wrapper()
+-&gt; return func(*args, **kwargs)
+&gt; .../ray/_private/worker.py(1871)init()</code></pre>
+  <ul>
+    <li>step 1(<code>ray://</code>)沒有停在 1871:它在 1697 進了 Ray Client 分支,1735 就 return 了。</li>
+    <li>step 2 停下來了,旗標是 <code>True</code>。</li>
+    <li><code>w</code> 顯示 <code>ray.init()</code> 先經過 <code>client_mode_hook.py:134</code> 的 wrapper,才進到真正的 <code>init</code>。</li>
+    <li>那次沒有起 cluster,所以 <code>bootstrap_address</code> 是 <code>None</code>。先 <code>ray start --head</code> 的話它會有值,會走 <code>else</code>。</li>
+  </ul>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>breakpoint</th><th>看什麼</th></tr></thead>
+      <tbody>
+        <tr><td><code>_private/worker.py:1697</code></td><td>有沒有進 Ray Client 分支</td></tr>
+        <tr><td><code>_private/worker.py:1839</code></td><td>找現有 cluster 之前</td></tr>
+        <tr><td><code>_private/worker.py:1871</code></td><td>要起新 cluster(1928)還是連現有的(1993)</td></tr>
+        <tr><td><code>_private/client_mode_hook.py:123</code></td><td>hook 決定要不要轉成 client,見下方</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>方法二:post-mortem,直接停在出錯的地方</h3>
+  <p>不用事先知道要停在哪。把要追的呼叫暫時包起來:</p>
+<pre><code>import pdb
+try:
+    ray.init()
+except AssertionError:
+    pdb.post_mortem()</code></pre>
+  <p>pdb 會停在 assert 那一行,再用 <code>u</code> 一層一層往上看是誰呼叫的。追「為什麼會走到這裡」時通常最快。</p>
+
+  <h3>看 <code>@client_mode_hook</code> 怎麼決定</h3>
+  <p><code>client_mode_hook.py</code> 有三層,每次呼叫時真正執行的是 <code>wrapper</code>:</p>
+<pre><code> 86  @overload def client_mode_hook(func)                       ┐ 只給型別檢查用,
+ 91  @overload def client_mode_hook(*, local_only_kwargs=...)   ┘ 不會執行
+ 95  def client_mode_hook(func=None, *, local_only_kwargs=()):  ← decorator 本體,import 時跑一次
+114      def decorator(func):
+118          def wrapper(*args, **kwargs):                      ← 每次呼叫都跑這個
+123              if client_mode_should_convert():               ← 旗標 + thread 狀態
+126                  if func.__name__ != "init" or is_client_mode_enabled_by_default:
+133                      return getattr(ray, func.__name__)(...)  ← 轉給 Ray Client
+134              return func(*args, **kwargs)                   ← 不轉,呼叫原函式</code></pre>
+  <p>breakpoint 下在 95 只會在 import 時停一次。要看每次呼叫怎麼決定,下在 123,並加條件,不然每個掛 hook 的函式都會停:</p>
+<pre><code>(Pdb) b /home/justinyeh1995_gmail_com/ray/python/ray/_private/client_mode_hook.py:123, func.__name__ == "_internal_kv_initialized"
+(Pdb) c
+&gt; .../client_mode_hook.py(123)wrapper()
+(Pdb) p func.__name__
+'_internal_kv_initialized'
+(Pdb) p client_mode_should_convert()
+True
+(Pdb) n        → 126
+(Pdb) n        → 127
+(Pdb) n        → 133  return getattr(ray, func.__name__)(...)   被轉給 Ray Client</code></pre>
+  <p><code>ray.init</code> 自己在 126 不成立(名字是 <code>init</code>),所以走 134 照常執行;它內部呼叫的 <code>_internal_kv_initialized</code> 在 126 成立,被轉走,回傳 <code>False</code>。</p>
+
+  <h3>常用指令</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>指令</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td><code>n</code> / <code>s</code></td><td>下一行 / 進入函式</td></tr>
+        <tr><td><code>r</code></td><td>跑到目前函式 return</td></tr>
+        <tr><td><code>c</code></td><td>繼續跑到下一個 breakpoint</td></tr>
+        <tr><td><code>w</code></td><td>印出呼叫堆疊</td></tr>
+        <tr><td><code>u</code> / <code>d</code></td><td>往上 / 往下切換 frame</td></tr>
+        <tr><td><code>ll</code></td><td>列出目前函式的完整原始碼</td></tr>
+        <tr><td><code>p expr</code> / <code>pp expr</code></td><td>印值 / 漂亮地印</td></tr>
+        <tr><td><code>b file:line</code> / <code>b</code></td><td>下 breakpoint / 列出所有 breakpoint</td></tr>
+        <tr><td><code>b file:line, 條件</code></td><td>條件 breakpoint</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>在 Ray 裡用 pdb 的坑</h3>
+  <ul>
+    <li><strong>breakpoint 用絕對路徑。</strong>有兩個 <code>worker.py</code>,而且 editable install 是透過 import hook 對應路徑的,寫 <code>b worker.py:1871</code> 可能找不到或停錯檔案。</li>
+    <li><strong>行號要對到可執行的那一行。</strong>停在註解或空行會得到 <code>*** Blank or comment</code>,breakpoint 不會生效。</li>
+    <li><strong>不要用 <code>b ray.init</code> 這種函式名稱。</strong><code>ray.init</code> 外面包了 <code>@client_mode_hook</code>,會停在 wrapper,不是 <code>init</code> 本體。</li>
+    <li><strong><code>q</code> 可能結束不了。</strong>pdb 用拋出 <code>BdbQuit</code> 來結束,而它是 <code>Exception</code> 的子類別,會被 script 的 <code>except Exception</code> 接住,script 就繼續跑下去(實測輸出 <code>step 2: local ray.init() failed: BdbQuit</code>)。要強制結束:<code>(Pdb) import os; os._exit(1)</code>。</li>
+    <li><strong>不要在 <code>ray://</code> 連線途中停太久。</strong>Ray Client 有背景 thread 和 gRPC timeout,停太久恢復後可能出現原本不會發生的 timeout。breakpoint 最好下在連線完成之後。</li>
+    <li><strong>pdb 只停 main thread。</strong>Ray Client 的資料串流、log 轉發在別的 thread,停下來時畫面上可能還會冒出 log。</li>
+    <li><strong>只對 driver 端有效。</strong><code>@ray.remote</code> 的 task 跑在別的 process,要用 <code>ray debug</code> 之類的工具。</li>
+  </ul>
+  <p>LazyVim 可以開 <code>lazyvim.plugins.extras.dap.core</code>,配合 python extra 在 nvim 裡用 debugger,原理一樣,只是有畫面。</p>
 </main>
 </body>
 </html>
