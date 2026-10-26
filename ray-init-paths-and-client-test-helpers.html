@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ray.init 路徑與 Client 測試工具</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F6;
+    --surface: #FFFFFF;
+    --ink: #14232B;
+    --muted: #55676F;
+    --rule: #D3DDDE;
+    --accent: #0B7A75;
+    --accent-soft: #DDF0EE;
+    --warn: #A94A16;
+    --warn-soft: #F7E6DB;
+    --code-bg: #E8EFEF;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E191E;
+      --surface: #142229;
+      --ink: #E2ECEE;
+      --muted: #93A5AC;
+      --rule: #26383F;
+      --accent: #4FC3BB;
+      --accent-soft: #123A3A;
+      --warn: #F0965E;
+      --warn-soft: #3A2417;
+      --code-bg: #1A2B32;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E191E;
+    --surface: #142229;
+    --ink: #E2ECEE;
+    --muted: #93A5AC;
+    --rule: #26383F;
+    --accent: #4FC3BB;
+    --accent-soft: #123A3A;
+    --warn: #F0965E;
+    --warn-soft: #3A2417;
+    --code-bg: #1A2B32;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+    margin: 0;
+  }
+  main { max-width: 760px; margin-inline: auto; }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.3; }
+  h1 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; font-weight: 700; margin: 56px 0 12px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 28px 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  ul, ol { padding-left: 1.3em; margin: 0 0 14px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  .meta { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 24px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 8px; }
+
+  .verdict { background: var(--accent-soft); border-radius: 6px; padding: 18px 20px; margin: 20px 0 8px; }
+  .verdict p:last-child, .verdict ul:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--accent); }
+
+  .toc { font-size: 0.92rem; margin: 24px 0 0; }
+  .toc ol { margin: 0; }
+
+  pre { background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); margin: 0 0 6px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; line-height: 1.55; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  details { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); padding: 10px 16px; margin: 0 0 10px; }
+  details[open] { padding-bottom: 14px; }
+  summary { cursor: pointer; font-weight: 500; }
+  details > *:not(summary) { margin-top: 10px; }
+  details p:last-child { margin-bottom: 0; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.6rem; }
+    body { padding-block: 28px 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ray Core · ray.init · Ray Client · 測試</p>
+  <h1>ray.init 路徑與 Client 測試工具</h1>
+  <p class="meta">整理自 2026-10-26,寫 <a href="https://github.com/ray-project/ray/pull/67407">ray#67407</a> 時的筆記 · 行號以 master ce4256ec64 加上 PR 的修改為準,之後可能會跑掉,用函式名稱找比較穩 · 相關筆記:<a href="ray-client-mode-critical-path.html">Ray Client 模式關鍵路徑</a>、<a href="ray-issue67142-client-mode-reset-notes.html">Issue 67142 Client Mode Reset</a></p>
+
+  <div class="verdict">
+    <p><strong>一句話:</strong><code>ray.init()</code> 先看 address 裡有沒有 <code>://</code>。有的話,這個 process 會變成 <strong>Ray Client 的 client</strong>;沒有的話,這個 process 自己會變成 <strong>driver</strong>,然後才決定是連上現有的 cluster,還是自己起一個。</p>
+    <ul>
+      <li><strong>Client:</strong>真正的 driver 在 server 那一邊,本機只是 gRPC client,呼叫靠 <code>@client_mode_hook</code> 轉過去。</li>
+      <li><strong>Driver:</strong>本機的 <code>global_worker</code> 直接連上 GCS 和 raylet。</li>
+      <li><strong><code>ray_start_client_server</code>:</strong>測試工具,把 client 和 server <strong>放在同一個 process 裡</strong>。所以「process 裡有 client」不代表「這個 process 不能當 driver」。</li>
+    </ul>
+  </div>
+
+  <nav class="toc">
+    <ol>
+      <li><a href="#s1">ray.init 的分岔總覽</a></li>
+      <li><a href="#s2">本機路徑:connect 還是 start</a></li>
+      <li><a href="#s3">誰才是 driver</a></li>
+      <li><a href="#s4">Process 裡的三個狀態</a></li>
+      <li><a href="#s5">ray_start_client_server 家族</a></li>
+      <li><a href="#s6">PR #67407 學到的事:原始旗標不夠用</a></li>
+      <li><a href="#s7">測試 fixture 速查</a></li>
+      <li><a href="#s8">複習題</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="s1">1. ray.init 的分岔總覽</h2>
+  <p><code>ray.init</code> 在 <code>python/ray/_private/worker.py</code>。在讀 address 之前,<code>@client_mode_hook</code> 已經先做了一次判斷:</p>
+  <ol>
+    <li><strong>Hook 這一層</strong>(<code>client_mode_hook.py:126</code>):只有在 <code>RAY_CLIENT_MODE=1</code> 時,<code>init</code> 本身才會被轉成 client 呼叫。其他情況下,不論旗標怎麼設,<code>init</code> 都會進到本機的函式。</li>
+    <li><strong>RAY_ADDRESS</strong>:如果 <code>address</code> 是 <code>None</code> 或 <code>"auto"</code>,而且有設定環境變數 <code>RAY_ADDRESS</code>,就用它取代 address。所以 <code>RAY_ADDRESS=ray://...</code> 加上不帶參數的 <code>ray.init()</code>,一樣會走 client。</li>
+    <li><strong>有沒有 <code>://</code></strong>(<code>if address is not None and "://" in address</code>):有就走 client builder,最後 <code>return ctx</code>;沒有就往下走本機路徑。</li>
+  </ol>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>呼叫方式</th><th>走哪條路</th><th>結果</th></tr></thead>
+      <tbody>
+        <tr><td><code>ray.init("ray://host:10001")</code></td><td>Client</td><td>連到 head 上的 client server。本機不是 driver。</td></tr>
+        <tr><td><code>ray.init("xxx://...")</code></td><td>Client</td><td><code>client_builder._get_builder_from_address</code> 會 <code>import xxx</code>,改用那個 module 的 <code>ClientBuilder</code>。<code>ray://</code> 只是其中一種。</td></tr>
+        <tr><td><code>ray.init("http://...")</code></td><td>直接報錯</td><td><code>ValueError</code>。通常是把 dashboard 的位址誤設給了 <code>RAY_ADDRESS</code>。</td></tr>
+        <tr><td><code>ray.init()</code></td><td>本機</td><td>找得到現有的 cluster 就 connect,找不到就 start。見第 2 節。</td></tr>
+        <tr><td><code>ray.init("auto")</code></td><td>本機</td><td>一定要找到現有的 cluster,找不到就丟 <code>ConnectionError</code>。</td></tr>
+        <tr><td><code>ray.init("local")</code></td><td>本機</td><td>一定 start 一個新的,不管有沒有現有的 cluster。</td></tr>
+        <tr><td><code>ray.init("10.0.0.5:6379")</code></td><td>本機</td><td>以 driver 身份連到這個 GCS。<strong>這可能是遠端的 cluster</strong>:「本機路徑」不等於「本機的 cluster」。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>幾個只在某一條路徑有效的參數:</p>
+  <ul>
+    <li><code>allow_multiple=True</code>:只有 client 能用。在本機路徑上會直接丟 RuntimeError。</li>
+    <li><code>ignore_reinit_error=True</code>:兩條路都有。本機路徑上,如果 <code>global_worker.connected</code> 已經是 True,就回傳現有的 context,不會丟出「called ray.init twice」的錯誤。</li>
+  </ul>
+
+  <h2 id="s2">2. 本機路徑:connect 還是 start</h2>
+  <p>本機路徑呼叫 <code>services.canonicalize_bootstrap_address(address, _temp_dir)</code>,裡面再呼叫 <code>get_ray_address_from_environment</code>(<code>services.py:413</code>):</p>
+<pre><code>address 是 None 或 "auto"?
+├─ 有 RAY_ADDRESS → 用它
+├─ 讀 /tmp/ray/ray_current_cluster(上一次成功 `ray start` 寫下的 GCS 位址)
+│    └─ address 是 "auto" 而且這個檔案沒有 → 改用任何偵測到的 gcs_server process(舊行為)
+├─ 找到位址 → "Connecting to existing Ray cluster at address: ..."
+└─ 沒找到
+     ├─ address 是 None   → 回傳 None → start 新的
+     └─ address 是 "auto" → ConnectionError("Could not find any running Ray instance...")
+
+address 是 "local" → 直接回傳 None → start 新的
+其他 address → parse 成 host:port → connect</code></pre>
+  <p>回傳 None 之後,程式會走到 <code>if bootstrap_address is None:</code>(註解寫的是 <code>we need to start a new cluster</code>),在這個 process 裡起 GCS 和 raylet,然後印出 <code>Started a local Ray instance</code>。</p>
+  <div class="note">
+    <p><strong>注意:</strong><code>ray_current_cluster</code> 只記錄<strong>最後一次</strong>寫入的位址。會寫入的只有 <code>ray start</code>(<code>scripts.py</code>)和測試用的 <code>cluster_utils.Cluster</code>;自己 <code>ray.init()</code> 起的 cluster 不會寫進這個檔案。如果機器上同時有好幾個 cluster,<code>ray.init()</code> 會挑檔案裡的那一個,並印出 <code>Found multiple active Ray instances</code> 的警告。</p>
+  </div>
+
+  <h2 id="s3">3. 誰才是 driver</h2>
+  <p>driver 是「以 <code>SCRIPT_MODE</code> 連進 cluster、負責提交 task 的 process」。<code>worker.py</code> 的 <code>global_worker</code> 是 module 層級的全域物件,一個 process 只有一份,上面記錄著這個 process 是不是 driver、有沒有連上。</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>情境</th><th>你的 script process</th><th>driver 在哪</th></tr></thead>
+      <tbody>
+        <tr><td>本機 <code>ray.init()</code>,start 新的</td><td>driver,同時也是 head 的擁有者</td><td>你的 process</td></tr>
+        <tr><td>本機 <code>ray.init()</code>,connect 現有的</td><td>driver</td><td>你的 process</td></tr>
+        <tr><td><code>ray.init("ray://...")</code>,server 是用 <code>ray start</code> 起的</td><td>gRPC client,<code>global_worker.connected</code> 是 False</td><td>head 上另外起的 SpecificServer process。proxier 會為每個 client 起一個(<code>proxier.py</code> 的 <code>start_specific_server</code>)。</td></tr>
+        <tr><td><code>ray_start_client_server()</code>(測試)</td><td>同時是 client 和 server</td><td><strong>同一個 process</strong>:server 在 <code>disable_client_hook()</code> 裡呼叫本機的 <code>ray.init()</code>。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>在 client 模式下,本機沒有 driver,所以 <code>ray.get</code>、<code>.remote()</code> 不能在本機執行,只能靠 hook 經由 gRPC 轉給遠端的 driver。這就是 <code>@client_mode_hook</code> 存在的原因。</p>
+
+  <h2 id="s4">4. Process 裡的三個狀態</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>狀態</th><th>位置</th><th>範圍</th><th>意思</th></tr></thead>
+      <tbody>
+        <tr><td><code>global_worker.connected</code></td><td><code>worker.py</code></td><td>整個 process</td><td>這個 process 是不是已經以 driver 或 worker 的身份連上了</td></tr>
+        <tr><td><code>is_client_mode_enabled</code></td><td><code>client_mode_hook.py</code> 的 module 全域變數</td><td>整個 process</td><td>有人明確開啟過 client mode</td></tr>
+        <tr><td>hook status</td><td><code>client_mode_hook.py</code> 的 <code>threading.local()</code></td><td>每個 thread 各一份</td><td>這個 thread 現在要不要轉呼叫。<code>disable_client_hook()</code> 會把它關掉。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>判斷「這次呼叫要不要轉成 client 呼叫」的是 <code>client_mode_should_convert()</code>:</p>
+<pre><code>(is_client_mode_enabled or is_client_mode_enabled_by_default)   # RAY_CLIENT_MODE=1
+    and _get_client_hook_status_on_thread()</code></pre>
+  <p>只看旗標,不看 hook status,就會漏掉「同一個 process 裡,server 那一邊合法地呼叫本機 init」的情況。第 6 節就是這樣出錯的。</p>
+  <p>旗標什麼時候會被打開:</p>
+  <ul>
+    <li><code>ray.init("ray://...")</code> → <code>client_connect.connect</code> 會<strong>無條件</strong>呼叫 <code>_explicitly_enable_client_mode()</code>(<code>client_connect.py:55</code>),而且是在連線<strong>之前</strong>。連線失敗之後沒有人把它關掉,這就是 #67142。</li>
+    <li>低階的 <code>ray.util.client.ray.connect()</code> → <code>_ClientContext.connect</code> 只有在 <code>not self._inside_client_test</code> 時才打開(<code>util/client/__init__.py:159</code>)。</li>
+  </ul>
+  <p>旗標什麼時候會被關掉:<code>ray.util.disconnect()</code> 或 <code>ray.shutdown()</code>,而且只有在所有 client context 都斷開(<code>len(_all_contexts) == 0</code>)時才會關。</p>
+
+  <h2 id="s5">5. ray_start_client_server 家族</h2>
+  <p>這些 helper 都在 <code>python/ray/util/client/ray_client_helpers.py</code>,用途是<strong>在測試裡</strong>不用 <code>ray start</code>,直接在<strong>同一個 process</strong> 裡起一個 Ray Client server(port 固定是 <strong>50051</strong>),再讓 client 連上去。這樣比較快,也比較容易 debug。</p>
+
+<pre><code>┌──────────── 同一個 pytest process ────────────┐
+│                                               │
+│  test code (main thread)                      │
+│    └─ ray.util.client.ray  ── gRPC ──┐        │
+│                                      ▼        │
+│  client server(gRPC threads, port 50051)     │
+│    └─ with disable_client_hook():             │
+│          ray.init(...)   ← 真正的 driver       │
+│                                               │
+└───────────────────────────────────────────────┘</code></pre>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Helper</th><th>做什麼</th><th>server 端怎麼 init</th></tr></thead>
+      <tbody>
+        <tr><td><code>ray_start_client_server_pair()</code></td><td>本體。設定 <code>ray._inside_client_test = True</code>,呼叫 <code>ray_client_server.serve(..., 50051)</code>,再 <code>ray.connect(...)</code>。yield 出 <code>(client, server)</code>。</td><td>預設的 handler(<code>server.py</code> 的 <code>serve</code> 裡):<code>with disable_client_hook(): ray.init(...)</code>,也就是起一個新的本機 cluster</td></tr>
+        <tr><td><code>ray_start_client_server()</code></td><td>包一層 pair,只 yield client。最常用。</td><td>同上</td></tr>
+        <tr><td><code>ray_start_client_server_for_address(address)</code></td><td>同上,但 server 會連到你給的 cluster。<code>test_client.py</code> 用它搭配 <code>call_ray_start_shared</code>,讓很多測試共用同一個 head,省下每次起 cluster 的時間。</td><td><code>with disable_client_hook(): ray.init(address, ...)</code></td></tr>
+        <tr><td><code>ray_start_cluster_client_server_pair(address)</code></td><td>舊的寫法,類似 for_address。</td><td>handler 直接 <code>real_ray.init(address=address)</code>。server 本身的 Init 處理已經包在 <code>disable_client_hook()</code> 裡了。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>結束時,helper 會呼叫 <code>ray.disconnect()</code> 和 <code>server.stop(0)</code>,然後在 <code>disable_client_hook()</code> 裡等 <code>ray.is_initialized()</code> 變成 False,最多等 30 秒。</p>
+
+  <h3>跟 call_ray_start 的差別</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th></th><th>ray_start_client_server</th><th>call_ray_start(帶 client server port)</th></tr></thead>
+      <tbody>
+        <tr><td>server 在哪</td><td>pytest 自己的 process 裡</td><td>另一個 process(<code>ray start --head</code>)</td></tr>
+        <tr><td>driver 在哪</td><td>pytest 自己的 process</td><td>head 上的 SpecificServer process</td></tr>
+        <tr><td>port</td><td>固定 50051</td><td>自己指定,例如 <code>--ray-client-server-port 25307</code></td></tr>
+        <tr><td>client 旗標</td><td>helper 的 <code>ray.connect</code> 不會打開(因為 <code>_inside_client_test</code>);但測試裡如果自己呼叫 <code>ray.init("ray://localhost:50051")</code>,就會打開</td><td><code>ray.init("ray://...")</code> 會打開</td></tr>
+        <tr><td>結束時</td><td>disconnect 並停掉 server</td><td><code>ray.shutdown()</code> 加上 <code>ray stop</code>,<strong>會停掉這台機器上所有的 Ray</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>用到這些 helper 的檔案(2026-10-26 時的搜尋結果):<code>test_client.py</code>、<code>test_client_references.py</code>、<code>test_ray_init_2.py</code>、<code>test_dataclient_disconnect.py</code>、<code>test_client_terminate.py</code>、<code>test_client_metadata.py</code>、<code>test_generators.py</code>、<code>test_client_warnings.py</code>、<code>test_ray_init.py</code>、<code>test_client_init.py</code>、<code>test_client_builder.py</code>,另外還有 tune、rllib、horovod、ludwig 的 client 測試,以及 <code>ray_client_microbenchmark.py</code>。</p>
+
+  <h2 id="s6">6. PR #67407 學到的事:原始旗標不夠用</h2>
+  <p>第一版的檢查放在本機路徑的開頭:</p>
+<pre><code>if ray._private.client_mode_hook.is_client_mode_enabled:
+    raise RuntimeError("Ray Client is already initialized in this process. ...")</code></pre>
+  <p>CI 的 <code>test_ray_init_2.py::test_env_var_no_override</code>(本機的 <code>test_ray_init_valid_keyword_with_client</code> 也一樣)失敗了:</p>
+<pre><code>Call to `ray.init()` on the server failed with: Ray Client is already initialized in this process. ...</code></pre>
+  <p>過程是這樣的:</p>
+  <ol>
+    <li><code>ray_start_client_server()</code> 在同一個 process 裡起 server,然後 <code>given_connection.disconnect()</code>。</li>
+    <li>測試接著呼叫 <code>ray.init("ray://localhost:50051")</code>,而 <code>client_connect.py:55</code> 會無條件把旗標設成 True。</li>
+    <li>server 收到 Init,在 <code>disable_client_hook()</code> 裡呼叫本機的 <code>ray.init()</code>。這個呼叫是合法的,卻被原始旗標的檢查擋了下來。</li>
+  </ol>
+  <p>改成 <code>client_mode_should_convert()</code> 之後,server 那個 thread 的 hook status 是 False,所以不會被擋;測試主 thread 的本機 <code>ray.init()</code> 照樣會被擋。這個條件剛好就是「<code>Node(...)</code> 裡的 hook 呼叫會不會被誤轉」,也就是 #67142 出問題的條件。</p>
+  <div class="note">
+    <p><strong>通則:</strong>想問「這次呼叫會不會被轉成 client 呼叫」,用 <code>client_mode_should_convert()</code>。<code>is_client_mode_enabled</code> 只回答「有沒有人開過 client mode」,不知道現在是哪個 thread、hook 有沒有被關掉。</p>
+    <p>另外,要讀 module 的全域變數,要用完整路徑或者讀 module 的屬性,不要 <code>from ... import is_client_mode_enabled</code>,那樣只會複製到 import 當下的值。import 函式就沒有這個問題。</p>
+  </div>
+
+  <h2 id="s7">7. 測試 fixture 速查</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Fixture</th><th>做什麼</th><th>什麼時候用</th></tr></thead>
+      <tbody>
+        <tr><td><code>shutdown_only</code></td><td>不起任何東西,只在結束時 <code>ray.shutdown()</code></td><td>測試自己呼叫 <code>ray.init()</code>,或者根本不需要 cluster(例如連線失敗的情境)</td></tr>
+        <tr><td><code>call_ray_start</code></td><td>在另一個 process 執行 <code>ray start ...</code>,結束時 <code>ray.shutdown()</code> 再 <code>ray stop</code></td><td>需要一個真的 head,例如要連 <code>ray://</code> 的 client server</td></tr>
+        <tr><td><code>ray_start_regular</code> 等</td><td>在測試的 process 裡 <code>ray.init(...)</code></td><td>一般的 driver 測試</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">傳指令給 call_ray_start</p>
+<pre><code>@pytest.mark.parametrize(
+    "call_ray_start",                       # 名字要跟 fixture 一樣
+    ["ray start --head --ray-client-server-port 25307 --port 0"],
+    indirect=True,                          # 值交給 fixture(request.param),不是給測試函式
+)
+def test_xxx(call_ray_start):
+    ray.init("ray://localhost:25307")</code></pre>
+  <ul>
+    <li><strong><code>indirect=True</code>:</strong>沒有它的話,pytest 會把字串直接當成參數傳給測試,取代 fixture,結果就不會起 cluster。</li>
+    <li><strong><code>--port 0</code>:</strong>GCS 的 port 讓系統自己挑,避免跟 6379 撞到。測試是透過 client server 連線的,不會直接碰 GCS。</li>
+    <li><strong>client server port 要寫死:</strong>測試要事先知道連哪個 port。挑一個沒人用的,不要用預設的 10001,也不要跟同一個檔案裡其他測試的 port 一樣。可以先用 <code>grep -rl &lt;port&gt; python/ray/tests</code> 確認。</li>
+    <li><strong>本機跑 <code>call_ray_start</code> 的測試之前:</strong>teardown 的 <code>ray stop</code> 會把你自己的 dev cluster 也停掉。</li>
+    <li><strong>in-process server 的測試不要平行跑:</strong>它們都用 50051,會互相搶 port。</li>
+  </ul>
+
+  <h2 id="s8">8. 複習題</h2>
+
+  <details>
+    <summary><code>ray.init()</code> 沒有給參數,機器上有一個用 <code>ray start --head</code> 起的 cluster。會發生什麼事?</summary>
+    <p>走本機路徑。<code>/tmp/ray/ray_current_cluster</code> 裡有那個 cluster 的 GCS 位址,所以會 connect 上去,印出 <code>Connecting to existing Ray cluster</code>。你的 process 會以 driver 身份連進去。</p>
+  </details>
+
+  <details>
+    <summary><code>ray.init("10.0.0.5:6379")</code> 會走 client 還是本機路徑?</summary>
+    <p>本機路徑,因為 address 裡沒有 <code>://</code>。你的 process 會以 driver 身份直接連到那個遠端的 GCS。「本機路徑」指的是「這個 process 要成為 driver」,不是「連本機的 cluster」。</p>
+  </details>
+
+  <details>
+    <summary><code>ray.init("ray://...")</code> 連線成功之後,driver 在哪裡?</summary>
+    <p>在 server 那一邊。用 <code>ray start</code> 起的 client server(proxier)會為每個 client 另外起一個 SpecificServer process,由它當 driver。你的 process 只是 gRPC client,<code>global_worker.connected</code> 是 False。</p>
+  </details>
+
+  <details>
+    <summary><code>ray://</code> 連線失敗之後,為什麼本機的 <code>ray.init()</code> 會在 <code>Node(...)</code> 裡出現空的 AssertionError?</summary>
+    <p><code>client_connect.connect</code> 在連線之前就把旗標打開了,失敗後沒有關掉。本機的 <code>init</code> 本身不會被轉(hook 對 <code>init</code> 有例外),但它裡面呼叫的 <code>_internal_kv_initialized</code> 有 <code>@client_mode_hook</code>,會被轉到一個沒連上的 client,回傳 False,於是 assert 失敗。</p>
+  </details>
+
+  <details>
+    <summary>為什麼 <code>ray_start_client_server()</code> 的 server 可以在「client 已經存在」的 process 裡呼叫本機 <code>ray.init()</code>?</summary>
+    <p>server 是在 <code>disable_client_hook()</code> 裡呼叫的。這會把那個 thread 的 hook status 設成 False,所以 <code>client_mode_should_convert()</code> 是 False,所有呼叫都走本機。旗標是整個 process 共用的,但 hook status 是每個 thread 各一份。</p>
+  </details>
+
+  <details>
+    <summary>想在本機路徑上擋掉「這個 process 其實在 client 模式」的情況,要檢查什麼?</summary>
+    <p><code>client_mode_should_convert()</code>。只看 <code>is_client_mode_enabled</code> 會誤擋 in-process server 那個合法的 init(見第 6 節)。</p>
+  </details>
+
+  <details>
+    <summary><code>@pytest.mark.parametrize("call_ray_start", [...], indirect=True)</code> 少了 <code>indirect=True</code> 會怎樣?</summary>
+    <p>字串會直接當成測試參數 <code>call_ray_start</code> 傳進去,取代 fixture,所以根本不會執行 <code>ray start</code>。接著 <code>ray.init("ray://...")</code> 會等大約 30 秒的連線 timeout,然後失敗。</p>
+  </details>
+
+  <details>
+    <summary>連到一個沒有人聽的 <code>ray://</code> port,要多久才會失敗?</summary>
+    <p>大約 30 秒。<code>connection_retries=3</code> 加上 backoff,最後丟出 <code>ConnectionError: ray client connection timeout</code>。<code>ray.init("ray://...")</code> 沒辦法調整 retries,所以測試這個情境時,要把這 30 秒算進去。</p>
+  </details>
+</main>
+</body>
+</html>
