@@ -304,6 +304,17 @@ def test_xxx(call_ray_start):
     <li><strong>本機跑 <code>call_ray_start</code> 的測試之前:</strong>teardown 的 <code>ray stop</code> 會把你自己的 dev cluster 也停掉。</li>
     <li><strong>in-process server 的測試不要平行跑:</strong>它們都用 50051,會互相搶 port。</li>
   </ul>
+  <p class="cap">fixture 內部(python/ray/tests/conftest.py:828、:845)</p>
+  <ul>
+    <li><strong>拿參數:</strong><code>getattr(request, "param", default_cmd)</code>。沒有 parametrize 就用預設的 <code>ray start --head --num-cpus=1 --min-worker-port=0 --max-worker-port=0 --port 0</code>。</li>
+    <li><strong>也可以傳 dict:</strong><code>{"cmd": "...", "env": {...}}</code>,<code>env</code> 會合併到 <code>os.environ</code> 再交給 subprocess,用來替 head 設環境變數。</li>
+    <li><strong>yield 的值:</strong>從 <code>ray start</code> 的輸出解析 <code>--address='...'</code>,得到 GCS address。連 <code>ray://</code> 的測試通常<strong>用不到這個值</strong>,參數擺在那裡只是為了觸發 fixture 起 cluster。</li>
+  </ul>
+  <p class="cap">PR #67407 的兩個例子</p>
+  <ul>
+    <li><code>test_ray_init.py</code> 用 25307,<code>test_client_multi.py</code> 用 25308(<code>test_multi_client_connect_after_client_connect_failed</code>:先連一個沒人聽的 port 拿到 <code>ConnectionError</code>,再用 <code>allow_multiple=True</code> 連 25308 跑 task)。兩個檔案的 port 分開,同時跑時才不會撞到。</li>
+    <li>這類測試要用 <code>call_ray_start</code> 而不是 <code>ray_start_client_server</code>,因為 client server 必須在<strong>另一個 process</strong>,test process 才是純 client,跟使用者的真實情境一樣。原因見<a href="#s6">第 6 節</a>。</li>
+  </ul>
 
   <h2 id="s8">8. 複習題</h2>
 
