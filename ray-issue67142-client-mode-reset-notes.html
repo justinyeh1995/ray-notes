@@ -138,6 +138,37 @@ ray.init()  # AssertionError</code></pre>
   <p><code>client_mode_hook.is_client_mode_enabled</code>(<code>client_mode_hook.py:16</code>)是 <strong>module-level 的全域旗標</strong>,決定所有 <code>@client_mode_hook</code> 修飾的函式要走本機路徑還是 Ray Client 路徑。<code>_ClientContext.connect</code> 在連線<strong>之前</strong>就把它打開(<code>__init__.py:162</code>),失敗時只呼叫 per-context 的 <code>self.disconnect()</code>,而這個 disconnect 不會動到旗標。旗標就這樣一直停在 True。</p>
   <p>Workaround:失敗後手動呼叫 <code>ray.util.disconnect()</code>,它走的是 <code>RayAPIStub.disconnect</code>,會把旗標關掉。</p>
 
+  <p class="q">為什麼旗標開著,<code>ray.init()</code> 就會撞 <code>AssertionError</code>?</p>
+  <p><strong>一句話:<code>init</code> 走本機,<code>init</code> 裡的檢查卻跑去問一個不存在的 client。</strong>(2026-10-31 整理)</p>
+  <ol>
+    <li><code>ray.init</code> 雖然掛了 <code>@client_mode_hook</code>,但 hook 對 <code>init</code> 有特例(<code>client_mode_hook.py:126</code>),只有 <code>RAY_CLIENT_MODE=1</code> 才轉送。所以 <code>init</code> 本體照常走本機路徑。</li>
+    <li><code>init</code> 裡面呼叫的其他函式沒有這個特例。<code>node.py:2279-2281</code> 的 <code>_record_stats</code> 先寫入 internal_kv,再 <code>assert</code> 它已經初始化。</li>
+    <li>寫和讀走了不同的路:</li>
+  </ol>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>函式(internal_kv.py)</th><th>@client_mode_hook</th><th>旗標開著時實際執行</th></tr></thead>
+      <tbody>
+        <tr><td><code>_initialize_internal_kv</code>(寫)</td><td>沒有(:20)</td><td>本機版本,設定本機的 <code>global_gcs_client</code></td></tr>
+        <tr><td><code>_internal_kv_initialized</code>(讀)</td><td>有(:28)</td><td>轉給 client。client 沒連上,<code>_ClientContext.__getattr__</code>(<code>__init__.py:273-278</code>)回傳 <code>lambda: False</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>本機的 kv 其實已經初始化好了,但讀取問的是沒連上的 client,永遠得到 <code>False</code>。那行 <code>assert</code> 沒附訊息,所以使用者只看到 bare <code>AssertionError</code>。</p>
+  <div class="note">
+    <p><strong>哪一行 assert 炸掉,要看走哪條路:</strong><code>_record_stats</code> 只在 <code>not connect_only</code> 時呼叫(<code>node.py:481</code>),也就是起新 cluster 的路徑。如果機器上已經有 cluster(log 會印 <code>Connecting to existing Ray cluster</code>),走的是 <code>connect_only=True</code>,炸掉的應該是另一個同樣寫法的 <code>assert _internal_kv_initialized()</code>,例如 <code>services.py:657</code> 或 <code>usage_lib.py</code> 裡的。實際是哪一行還沒驗證。</p>
+  </div>
+
+  <p class="q">那為什麼不直接在連線失敗時把旗標關掉?</p>
+  <p>因為旗標是<strong>整個 process 共用</strong>的,而 connect 失敗的那個地方看不到其他 client 的狀態。要安全地關掉,得先知道下面這些情況:</p>
+  <ul>
+    <li><strong>其他 context 還連著:</strong>用 <code>allow_multiple=True</code> 時可能有好幾個 client context。一個失敗就把旗標關掉,其他還連著的 context 的 <code>ray.get</code> / <code>.remote</code> 會全部改走本機路徑而壞掉(第 4 節 A)。<code>_ClientContext</code> 看不到 <code>_all_contexts</code>,只有 <code>RayAPIStub</code> 看得到,所以 <code>disconnect</code> / <code>shutdown</code> 都只在 <code>len(_all_contexts) == 0</code> 時才關。</li>
+    <li><strong>測試自己在管旗標:</strong><code>_inside_client_test</code> 時,旗標由測試的 <code>enable_client_mode()</code> 控制,connect 不該去動它(第 4 節 B)。</li>
+    <li><strong><code>RAY_CLIENT_MODE=1</code>:</strong>整個 process 預設就是 client mode,關掉旗標會改變這個預設行為。</li>
+    <li><strong>旗標是刻意在連線<em>之前</em>打開的:</strong>連線過程中呼叫的 API 要走 client 路徑。</li>
+  </ul>
+  <p>再加上 maintainer 的規格本來就是「連線失敗後本機 <code>ray.init()</code> 仍然要失敗,只是錯誤要清楚」,所以 PR #67407 不動旗標的生命週期,只在 <code>ray.init()</code> 開頭用 <code>client_mode_should_convert() and num_connected_contexts() == 0</code> 提早擋下,給出 <code>Ray Client is already initialized</code>。這樣既不會碰到上面那些情況,也不會讓使用者掉進「一半本機、一半 client」的狀態。</p>
+
   <h2>2. 旗標的生命週期</h2>
   <p>關鍵是分清楚「per-context」和「process-wide」兩層。旗標只有一個,context 可以有很多個。</p>
   <div class="tablewrap">
